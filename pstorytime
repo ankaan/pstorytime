@@ -1,0 +1,192 @@
+#!/usr/bin/env python
+import os
+from os.path import *
+
+from mplayer import Player, CmdPrefix, PIPE, Step
+
+class InvalidBookException(Exception):
+  pass
+
+class SectionSkipException(Exception):
+  pass
+
+class AudioBookState(object):
+  pass
+
+class AudioBook(object):
+  def __init__(self,location):
+    location = normcase(expanduser(location))
+    if not exists(location):
+      e = IOError()
+      e.errno = 2
+      e.strerror = "No such file or directory"
+      e.filename = location
+      raise e
+
+    self.playing = False
+
+    self.position = 0
+    
+    # A book can either be given as a directory or as a file.
+    # If given as a file, start playing there using bookmark if possible.
+    # Otherwise the last played file is used using the stored position, or
+    # lacking that the first file in the book.
+    if isfile(location):
+      self.book = dirname(location)
+      self.section = basename(location)
+    elif isdir(location):
+      self.book = location
+      sections = self.listSections()
+      if len(sections)==0:
+        raise InvalidBookException("No files in the book.")
+      self.section = sections[0]
+    else:
+      raise Exception("Given object exists, but is neither a file nor directory. What is it?")
+
+    # Set up mplayer.
+    self.player = Player(stdout=PIPE, stderr=PIPE, autospawn=False)
+
+
+
+    ### Beginning of ugly hack. ################################
+    baseargs = self.player._base_args
+
+    # "-really-quiet" changed to "-quiet" (needed to spot when mplayer fails to load files.)
+    try:
+      i = baseargs.index("-really-quiet")
+      baseargs = baseargs[:i] + ("-quiet",) + baseargs[i+1:]
+    except ValueError:
+      pass
+
+    # "-noconfig all" removed all together (we want to use ordinary mplayer config.)
+    for i in xrange(0,len(baseargs)-1):
+      if baseargs[i] == "-noconfig" and baseargs[i+1] == "all":
+        baseargs = baseargs[:i] + baseargs[i+2:]
+        break
+
+    self.player._base_args = baseargs
+    ### End of ugly hack. ######################################
+
+
+    # Fix args.
+    self.player.args = ['-msglevel', 'global=6', '-include', '~/.pstorytime/mplayer.conf']
+
+    self.player.stdout.connect(self._handle_stdout)
+    self.player.stderr.connect(self._handle_stderr)
+
+    self.player.spawn()
+
+  # Listen for events from mplayer.
+  def _handle_stdout(self,data):
+    print("stdout: {0}".format(data))
+    if data == 'Starting playback...':
+      self._startComplete()
+    elif data.startswith('EOF code:'):
+      self._sectionDone()
+
+  def _handle_stderr(self,data):
+    print("stderr: {0}".format(data))
+    if data == 'Failed to recognize file format.':
+      self._sectionDone()
+
+  def _sectionDone(self):
+    self.playing = False
+    self.position = 0
+    sections = self.listSections()
+    try:
+      i = sections.index(self.section)
+      if i+1 < len(sections):
+        self.section = sections[i+1]
+        self.play()
+      elif len(sections) > 0:
+        self.section = sections[0]
+    except ValueError:
+      pass
+
+  def _startComplete(self):
+    pass
+
+  def _bookfile(self,e):
+    return isfile(join(self.book,e))
+
+  def listSections(self):
+    entries = os.listdir(self.book)
+    entries.sort()
+    files = filter(self._bookfile,entries)
+    return files
+
+  def play(self, section = None, position = None):
+    if (not self.playing) or section != None or position != None:
+      self.playing = True
+
+      # Change section
+      if section != None:
+        self.section = section
+
+      # Change position
+      if position != None:
+        self.position = position
+      else:
+        pass
+        # TODO: Use bookmark
+
+      # Load file if necessary, otherwise unpause if not playing anything.
+      if section != self.player.filename:
+        filename = join(self.book,self.section)
+        self.player.loadfile(filename)
+      elif self.player.paused:
+        self.player.pause()
+
+      # Set position in file.
+      self.player.time_pos = self.position
+
+  def pause(self):
+    if self.playing:
+      self.playing = False
+      if not self.player.paused:
+        # Pause playback
+        self.player.pause()
+
+      # Update bookmark
+      pos = self.player.time_pos
+      if pos != None:
+        self.position = pos
+        # TODO: Update bookmark for real.
+
+  def playpause(self):
+    if self.playing:
+      self.pause()
+    else:
+      self.play()
+
+  def seek(self,d):
+    # Make the seek
+    self.player.time_pos = Step(d)
+
+    # Update bookmark
+    self.position = self.player.time_pos
+    # TODO: Update bookmark for real
+
+  def state(self):
+    s = AudioBookState()
+    s.playing = self.playing
+    s.book = self.book
+    s.section = self.section
+    s.pos = self.player.time_pos
+    s.storepos = self.position
+    s.volume = self.player.volume
+    return s
+
+  def vol(self,v):
+    self.player.volume = v
+
+  def dvol(self,dv):
+    self.player.volume = Step(dv)
+
+  def sectionSkip(self,d):
+    i = sections.index(self.section)
+    if 0 < i+d <= len(sections):
+      self.section = sections[i+d]
+      self.play()
+    else:
+      raise SectionException()
