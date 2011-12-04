@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import os
 import string
+import time
 from os.path import *
 
 from mplayer import Player, CmdPrefix, PIPE, Step
@@ -95,11 +96,11 @@ class AudioBook(object):
     entries.sort()
     return filter(lambda e: isfile(join(self.directory,e)),entries)
 
-  def play(self, startfile = None, startposition = None):
-    return self._play(startfile, startposition, log=True)
+  def play(self, startfile = None, startpos = None):
+    return self._play(startfile, startpos, log=True)
 
-  def _play(self, startfile = None, startposition = None, log = False):
-    if (not self.playing) or startfile != None or startposition != None:
+  def _play(self, startfile = None, startpos = None, log = False):
+    if (not self.playing) or startfile != None or startpos != None:
       self._pause(log = log)
       self.playing = True
 
@@ -108,8 +109,8 @@ class AudioBook(object):
         # Try to load last state from play log.
         if len(self.playlog) > 0:
           (_,_,pos,startfile) = self.playlog[-1]
-          if startposition == None:
-            startposition = pos
+          if startpos == None:
+            startpos = pos
         # Or if the play log is empty, play the first file in the book.
         else:
           files = self.listFiles()
@@ -122,7 +123,7 @@ class AudioBook(object):
 
       # Load file if necessary, otherwise unpause if not playing anything.
       if self.curfile != self.player.filename:
-        path = join(self.book,self.curfile)
+        path = join(self.directory,self.curfile)
         self.player.loadfile(path)
       elif self.player.paused:
         self.player.pause()
@@ -130,31 +131,31 @@ class AudioBook(object):
       self.curlength = self.player.length
 
       # Set position in file.
-      if startposition != None:
-        if startposition < -self.curlength:
+      if startpos != None:
+        if startpos < -self.curlength:
           # Position is in a file further back
           prevfile = self._getFile(-1)
           if prevfile == None:
             # Start playing where we are, in the beginning of the first file.
             pass
           else:
-            self._play(prevfile, self.curlength-startposition)
-        elif startposition < 0:
+            self._play(prevfile, self.curlength-startpos)
+        elif startpos < 0:
           # Position relative to the end of the file
-          self.player.time_pos = self.curlength-startposition
-        elif startposition < self.curlength:
+          self.player.time_pos = self.curlength-startpos
+        elif startpos < self.curlength:
           # Position relative to the beginning of the file
-          self.player.time_pos = startposition
+          self.player.time_pos = startpos
         else:
           # Position is in a file further on
           nextfile = self._getFile(1)
           if nextfile == None:
             self._endOfBook()
           else:
-            self._play(nextfile, startposition-self.curlength)
+            self._play(nextfile, startpos-self.curlength)
 
       # Update play log.
-      self._lognow("play",self.player.time_pos)
+      self._lognow("start",self.player.time_pos)
       # TODO: Update auto save, start autosaving.
           
 
@@ -169,7 +170,7 @@ class AudioBook(object):
         self.player.pause()
 
       # Update play log.
-      self._lognow("pause",self.player.time_pos)
+      self._lognow("stop",self.player.time_pos)
       # TODO: Remove autosave, stop autosaving.
       #pos = self.player.time_pos
 
@@ -213,7 +214,7 @@ class AudioBook(object):
       return None
 
   def getlog(self):
-    return self.playlog
+    return self.playlog[:]
 
   def _autolognow(self):
     pos = self.player.time_pos
@@ -247,7 +248,7 @@ class AudioBook(object):
     assert len(data) == 4, "_rawlog takes a tuple of 4 elements."
     path = join(self.directory,self.playlogfile)
     self.playlog.append(data)
-    line = string.join(data)
+    line = string.join(data)+"\n"
     try:
       with open(path,'ab') as f:
         f.write(line)
