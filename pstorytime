@@ -8,7 +8,7 @@ from mplayer import Player, CmdPrefix, PIPE, Step
 class InvalidBookException(Exception):
   pass
 
-class FileSkipException(Exception):
+class SkipFileException(Exception):
   pass
 
 class AudioBook(object):
@@ -24,8 +24,6 @@ class AudioBook(object):
     self.pstorydatafile = ".pstorydata"
 
     self.playing = False
-
-    self.position = 0
     
     # A book can either be given as a directory or as a file.
     # If given as a file, start playing there using bookmark if possible.
@@ -43,9 +41,9 @@ class AudioBook(object):
     else:
       raise Exception("Given object exists, but is neither a file nor directory. What is it?")
 
+
     # Set up mplayer.
     self.player = Player(stdout=PIPE, stderr=PIPE, autospawn=False)
-
 
 
     ### Beginning of ugly hack. ################################
@@ -131,9 +129,9 @@ class AudioBook(object):
         # TODO: Use bookmark
 
       # Load file if necessary, otherwise unpause if not playing anything.
-      if startfile != self.player.filename:
-        filename = join(self.book,self.file)
-        self.player.loadfile(filename)
+      if self.file != self.player.filename:
+        path = join(self.book,self.file)
+        self.player.loadfile(path)
       elif self.player.paused:
         self.player.pause()
 
@@ -182,18 +180,19 @@ class AudioBook(object):
   def dvol(self,dv):
     self.player.volume = Step(dv)
 
-  def fileSkip(self,d):
+  def skipFile(self,d):
+    files = self.listFiles()
     i = files.index(self.file)
     if 0 < i+d <= len(files):
       self.file = files[i+d]
       self.play()
     else:
-      raise FileSkipException()
+      raise SkipFileException()
 
   def _load(self):
-    filename = join(self.book,self.pstorydatafile)
+    path = join(self.book,self.pstorydatafile)
     try:
-      with open(filename,'r') as f:
+      with open(path,'r') as f:
         data = json.load(f)
     except:
       data = {}
@@ -204,9 +203,11 @@ class AudioBook(object):
     return data
 
   def _save(self,data):
-    filename = join(self.book,self.pstorydatafile)
+    path = join(self.book,self.pstorydatafile)
     try:
-      with open(filename,'r') as f:
+      with open(path,'r') as f:
         json.dump(data,f)
     except:
       pass
+
+ab = AudioBook("testbook")
