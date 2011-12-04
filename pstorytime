@@ -72,15 +72,15 @@ class AudioBook(object):
       self._fileDone()
 
   def _fileDone(self):
-    files = self.listFiles()
-    try:
-      i = files.index(self.curfile)
-      if i+1 < len(files):
-        self._play(files[i+1], log=False)
-      elif len(files) > 0:
-        self._play(files[0], log=False)
-    except ValueError:
-      pass
+    nextfile = self.getFile(1)
+    if nextfile != None:
+      self._play(nextfile, log=False)
+    else:
+      self._endOfBook()
+
+  def _endOfBook(self):
+    # TODO: End of book reached.
+    pass
 
   def _startComplete(self):
     pass
@@ -118,12 +118,33 @@ class AudioBook(object):
       elif self.player.paused:
         self.player.pause()
       else:
-        assert False "Invalid state: The correct file is loaded and we are not paused. Why are we trying to start playing?"
+        assert False ('Invalid state: The correct file is loaded and we are not paused. Why are we trying to start playing?')
 
       # Set position in file.
       if startposition != None:
-        # TODO: Allow negative startposition
-        self.player.time_pos = startposition
+        if startposition < -self.player.length:
+          # Position is in a file further back
+          prevfile = self._getFile(-1)
+          if prevfile == None:
+            # Start playing where we are, in the beginning of the first file.
+            pass
+          else:
+            self._play(prevfile, self.player.length-startposition)
+        elif startposition < 0:
+          # Position relative to the end of the file
+          self.player.time_pos = self.player.length-startposition
+        elif startposition < self.player.length:
+          # Position relative to the beginning of the file
+          self.player.time_pos = startposition
+        else:
+          # Position is in a file further on
+          nextfile = self._getFile(1)
+          if nextfile == None:
+            self._endOfBook()
+          else:
+            self._play(nextfile, startposition-self.player.length)
+          
+
 
   def pause(self):
     if self.playing:
@@ -171,11 +192,14 @@ class AudioBook(object):
     self.player.speed = Step(ds)
 
   def getFile(self,d):
-    files = self.listFiles()
-    i = files.index(self.curfile)
-    if 0 < i+d <= len(files):
-      return files[i+d]
-    else:
+    try:
+      files = self.listFiles()
+      i = files.index(self.curfile)
+      if 0 < i+d <= len(files):
+        return files[i+d]
+      else:
+        return None
+    except ValueError:
       return None
 
 ab = AudioBook("testbook")
