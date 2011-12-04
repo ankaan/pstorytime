@@ -5,42 +5,26 @@ from os.path import *
 
 from mplayer import Player, CmdPrefix, PIPE, Step
 
-class InvalidBookException(Exception):
-  pass
-
 class SkipFileException(Exception):
   pass
 
 class AudioBook(object):
-  def __init__(self,location):
-    location = normcase(expanduser(location))
-    if not exists(location):
+  def __init__(self,directory):
+    self.directory = normcase(expanduser(directory))
+    self.curfile = None
+    if not isdir(directory):
       e = IOError()
       e.errno = 2
       e.strerror = "No such file or directory"
-      e.filename = location
+      e.filename = directory
       raise e
 
-    self.pstorydatafile = ".pstorydata"
+    self.playlogfile = ".pstorylog"
+
+    # TODO: Load play log.
+    # TODO: Merge and remove temporary seek and auto save.
 
     self.playing = False
-    
-    # A book can either be given as a directory or as a file.
-    # If given as a file, start playing there using bookmark if possible.
-    # Otherwise the last played file is used using the stored position, or
-    # lacking that the first file in the book.
-    if isfile(location):
-      self.book = dirname(location)
-      self.file = basename(location)
-    elif isdir(location):
-      self.book = location
-      files = self.listFiles()
-      if len(files)==0:
-        raise InvalidBookException("No files in the book.")
-      self.file = files[0]
-    else:
-      raise Exception("Given object exists, but is neither a file nor directory. What is it?")
-
 
     # Set up mplayer.
     self.player = Player(stdout=PIPE, stderr=PIPE, autospawn=False)
@@ -88,55 +72,58 @@ class AudioBook(object):
       self._fileDone()
 
   def _fileDone(self):
-    self.playing = False
-    self.position = 0
     files = self.listFiles()
     try:
-      i = files.index(self.file)
+      i = files.index(self.curfile)
       if i+1 < len(files):
-        self.file = files[i+1]
-        self.play()
+        self._play(files[i+1], log=False)
       elif len(files) > 0:
-        self.file = files[0]
+        self._play(files[0], log=False)
     except ValueError:
       pass
 
   def _startComplete(self):
     pass
 
-  def _bookfile(self,e):
-    return isfile(join(self.book,e))
-
   def listFiles(self):
-    entries = os.listdir(self.book)
+    entries = os.listdir(self.directory)
     entries.sort()
-    files = filter(self._bookfile,entries)
-    return files
+    return filter(lambda e: isfile(join(self.directory,e)),entries)
 
   def play(self, startfile = None, startposition = None):
+    return self._play(startfile,startposition)
+
+  def _play(self, startfile = None, startposition = None, log = True):
     if (not self.playing) or startfile != None or startposition != None:
       self.playing = True
 
+      # Load state from play log
+      if startfile == None and self.curfile == None:
+        # TODO: Load last file and position from play log.
+        pass
+      
       # Change file
       if startfile != None:
-        self.file = startfile
+        self.curfile = startfile
+        if startposition == None:
+          startposition = 0
 
-      # Change position
-      if startposition != None:
-        self.position = startposition
-      else:
-        pass
-        # TODO: Use bookmark
+      # TODO: Update play log.
+      # TODO: Update auto save, start autosaving.
 
       # Load file if necessary, otherwise unpause if not playing anything.
-      if self.file != self.player.filename:
-        path = join(self.book,self.file)
+      if self.curfile != self.player.filename:
+        path = join(self.book,self.curfile)
         self.player.loadfile(path)
       elif self.player.paused:
         self.player.pause()
+      else:
+        assert False "Invalid state: The correct file is loaded and we are not paused. Why are we trying to start playing?"
 
       # Set position in file.
-      self.player.time_pos = self.position
+      if startposition != None:
+        # TODO: Allow negative startposition
+        self.player.time_pos = startposition
 
   def pause(self):
     if self.playing:
@@ -145,11 +132,9 @@ class AudioBook(object):
         # Pause playback
         self.player.pause()
 
-      # Update bookmark
-      pos = self.player.time_pos
-      if pos != None:
-        self.position = pos
-        # TODO: Update bookmark for real.
+      # TODO: Update play log.
+      # TODO: Remove temporary seek and autosave, stop autosaving.
+      #pos = self.player.time_pos
 
   def playpause(self):
     if self.playing:
@@ -160,18 +145,17 @@ class AudioBook(object):
   def seek(self,d):
     # Make the seek
     self.player.time_pos = Step(d)
+    # TODO: Allow seeking across files.
 
-    # Update bookmark
-    self.position = self.player.time_pos
-    # TODO: Update bookmark for real
+    # TODO: Update play log after a timeout... (In the mean time store in temporary file.)
 
-  def state(self):
-    return  { "playing" :   self.playing
-            , "book" :      self.book
-            , "file" :      self.file
-            , "pos" :       self.player.time_pos
-            , "storepos" :  self.position
-            , "volume" :    self.player.volume
+  def status(self):
+    return  { "playing"   : self.playing
+            , "directory" : self.directory
+            , "curfile"   : self.curfile
+            , "position"  : self.player.time_pos
+            , "volume"    : self.player.volume
+            , "speed"     : self.player.speed
             }
 
   def vol(self,v):
@@ -180,34 +164,18 @@ class AudioBook(object):
   def dvol(self,dv):
     self.player.volume = Step(dv)
 
-  def skipFile(self,d):
+  def speed(self,s):
+    self.player.speed = s
+
+  def dspeed(self,ds):
+    self.player.speed = Step(ds)
+
+  def getFile(self,d):
     files = self.listFiles()
-    i = files.index(self.file)
+    i = files.index(self.curfile)
     if 0 < i+d <= len(files):
-      self.file = files[i+d]
-      self.play()
+      return files[i+d]
     else:
-      raise SkipFileException()
-
-  def _load(self):
-    path = join(self.book,self.pstorydatafile)
-    try:
-      with open(path,'r') as f:
-        data = json.load(f)
-    except:
-      data = {}
-    
-    if type(data) != dict:
-      data = {}
-
-    return data
-
-  def _save(self,data):
-    path = join(self.book,self.pstorydatafile)
-    try:
-      with open(path,'r') as f:
-        json.dump(data,f)
-    except:
-      pass
+      return None
 
 ab = AudioBook("testbook")
