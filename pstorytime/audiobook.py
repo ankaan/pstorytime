@@ -1,69 +1,91 @@
-#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# Copyright (C) 2011 Anders Engström <ankan@ankan.eu>
+#
+# This file is part of pstorytime.
+#
+# pstorytime is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# pstorytime is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with pstorytime.  If not, see <http://www.gnu.org/licenses/>.
+
 import os
 import string
 import time
+import threading
 from os.path import *
 
-from mplayer import Player, CmdPrefix, PIPE, Step
+from mplayer import *
+from pstorytime import *
 
 class AudioBook(object):
   def __init__(self,directory):
-    self.directory = normcase(expanduser(directory))
-    self.curfile = None
-    self.curlength = 0.0
-    if not isdir(directory):
-      e = IOError()
-      e.errno = 2
-      e.strerror = "No such file or directory"
-      e.filename = directory
-      raise e
+    self.lock = threading.RLock()
+    with self.lock:
+      self.directory = normcase(expanduser(directory))
+      self.curfile = None
+      self.curlength = 0.0
+      if not isdir(directory):
+        e = IOError()
+        e.errno = 2
+        e.strerror = "No such file or directory"
+        e.filename = directory
+        raise e
 
-    self.playlogfile = ".pstorylog"
-    self.autologfile = self.playlogfile+".auto"
+      self.playlogfile = ".pstorylog"
+      self.autologfile = self.playlogfile+".auto"
 
-    # Load play log from file.
-    self.playlog = self._loadlog(self.playlogfile)
+      # Load play log from file.
+      self.playlog = self._loadlog(self.playlogfile)
 
-    # Merge in old auto save (should only be there if last session crashed while playing.)
-    if isfile(self.autologfile):
-      auto = self._loadlog(self.autologfile)
-      if len(auto)==1:
-        self._rawlog(auto[0])
-      os.remove(self.autologfile)
+      # Merge in old auto save (should only be there if last session crashed while playing.)
+      if isfile(self.autologfile):
+        auto = self._loadlog(self.autologfile)
+        if len(auto)==1:
+          self._rawlog(auto[0])
+        os.remove(self.autologfile)
 
-    self.playing = False
+      self.playing = False
 
-    # Set up mplayer.
-    self.player = Player(stdout=PIPE, stderr=PIPE, autospawn=False)
-
-
-    ### Beginning of ugly hack. ################################
-    baseargs = self.player._base_args
-
-    # "-really-quiet" changed to "-quiet" (needed to spot when mplayer fails to load files.)
-    try:
-      i = baseargs.index("-really-quiet")
-      baseargs = baseargs[:i] + ("-quiet",) + baseargs[i+1:]
-    except ValueError:
-      pass
-
-    # "-noconfig all" removed all together (we want to use ordinary mplayer config.)
-    for i in xrange(0,len(baseargs)-1):
-      if baseargs[i] == "-noconfig" and baseargs[i+1] == "all":
-        baseargs = baseargs[:i] + baseargs[i+2:]
-        break
-
-    self.player._base_args = baseargs
-    ### End of ugly hack. ######################################
+      # Set up mplayer.
+      self.player = Player(stdout=PIPE, stderr=PIPE, autospawn=False)
 
 
-    # Fix args.
-    self.player.args = ['-msglevel', 'global=6', '-include', '~/.pstorytime/mplayer.conf']
+      ### Beginning of ugly hack. ################################
+      baseargs = self.player._base_args
 
-    self.player.stdout.connect(self._handle_stdout)
-    self.player.stderr.connect(self._handle_stderr)
+      # "-really-quiet" changed to "-quiet" (needed to spot when mplayer fails to load files.)
+      try:
+        i = baseargs.index("-really-quiet")
+        baseargs = baseargs[:i] + ("-quiet",) + baseargs[i+1:]
+      except ValueError:
+        pass
 
-    self.player.spawn()
+      # "-noconfig all" removed all together (we want to use ordinary mplayer config.)
+      for i in xrange(0,len(baseargs)-1):
+        if baseargs[i] == "-noconfig" and baseargs[i+1] == "all":
+          baseargs = baseargs[:i] + baseargs[i+2:]
+          break
+
+      self.player._base_args = baseargs
+      ### End of ugly hack. ######################################
+
+
+      # Fix args.
+      self.player.args = ['-msglevel', 'global=6', '-include', '~/.pstorytime/mplayer.conf']
+
+      self.player.stdout.connect(self._handle_stdout)
+      self.player.stderr.connect(self._handle_stderr)
+
+      self.player.spawn()
 
   # Listen for events from mplayer.
   def _handle_stdout(self,data):
@@ -267,5 +289,3 @@ class AudioBook(object):
       return map(lambda line: tuple(line.split(' ',3)), lines)
     except:
       return []
-
-ab = AudioBook("testbook")
