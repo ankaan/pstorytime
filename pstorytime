@@ -1,17 +1,15 @@
 #!/usr/bin/env python
 import os
-import json
+import string
 from os.path import *
 
 from mplayer import Player, CmdPrefix, PIPE, Step
-
-class SkipFileException(Exception):
-  pass
 
 class AudioBook(object):
   def __init__(self,directory):
     self.directory = normcase(expanduser(directory))
     self.curfile = None
+    self.curlength = 0.0
     if not isdir(directory):
       e = IOError()
       e.errno = 2
@@ -20,9 +18,17 @@ class AudioBook(object):
       raise e
 
     self.playlogfile = ".pstorylog"
+    self.autologfile = self.playlogfile+".auto"
 
-    # TODO: Load play log.
-    # TODO: Merge and remove temporary seek and auto save.
+    # Load play log from file.
+    self.playlog = self._loadlog(self.playlogfile)
+
+    # Merge in old auto save (should only be there if last session crashed while playing.)
+    if isfile(self.autologfile):
+      auto = self._loadlog(self.autologfile)
+      if len(auto)==1:
+        self._rawlog(auto[0])
+      os.remove(self.autologfile)
 
     self.playing = False
 
@@ -74,13 +80,12 @@ class AudioBook(object):
   def _fileDone(self):
     nextfile = self.getFile(1)
     if nextfile != None:
-      self._play(nextfile, log=False)
+      self._play(nextfile)
     else:
       self._endOfBook()
 
   def _endOfBook(self):
-    # TODO: End of book reached.
-    pass
+    self._lognow("end",self.curlength)
 
   def _startComplete(self):
     pass
@@ -91,25 +96,29 @@ class AudioBook(object):
     return filter(lambda e: isfile(join(self.directory,e)),entries)
 
   def play(self, startfile = None, startposition = None):
-    return self._play(startfile,startposition)
+    return self._play(startfile, startposition, log=True)
 
-  def _play(self, startfile = None, startposition = None, log = True):
+  def _play(self, startfile = None, startposition = None, log = False):
     if (not self.playing) or startfile != None or startposition != None:
+      self._pause(log = log)
       self.playing = True
 
       # Load state from play log
       if startfile == None and self.curfile == None:
-        # TODO: Load last file and position from play log.
-        pass
+        # Try to load last state from play log.
+        if len(self.playlog) > 0:
+          (_,_,pos,startfile) = self.playlog[-1]
+          if startposition == None:
+            startposition = pos
+        # Or if the play log is empty, play the first file in the book.
+        else:
+          files = self.listFiles()
+          if len(files) > 0:
+            startfile = files[0]
       
       # Change file
       if startfile != None:
         self.curfile = startfile
-        if startposition == None:
-          startposition = 0
-
-      # TODO: Update play log.
-      # TODO: Update auto save, start autosaving.
 
       # Load file if necessary, otherwise unpause if not playing anything.
       if self.curfile != self.player.filename:
@@ -117,23 +126,23 @@ class AudioBook(object):
         self.player.loadfile(path)
       elif self.player.paused:
         self.player.pause()
-      else:
-        assert False ('Invalid state: The correct file is loaded and we are not paused. Why are we trying to start playing?')
+
+      self.curlength = self.player.length
 
       # Set position in file.
       if startposition != None:
-        if startposition < -self.player.length:
+        if startposition < -self.curlength:
           # Position is in a file further back
           prevfile = self._getFile(-1)
           if prevfile == None:
             # Start playing where we are, in the beginning of the first file.
             pass
           else:
-            self._play(prevfile, self.player.length-startposition)
+            self._play(prevfile, self.curlength-startposition)
         elif startposition < 0:
           # Position relative to the end of the file
-          self.player.time_pos = self.player.length-startposition
-        elif startposition < self.player.length:
+          self.player.time_pos = self.curlength-startposition
+        elif startposition < self.curlength:
           # Position relative to the beginning of the file
           self.player.time_pos = startposition
         else:
@@ -142,19 +151,26 @@ class AudioBook(object):
           if nextfile == None:
             self._endOfBook()
           else:
-            self._play(nextfile, startposition-self.player.length)
+            self._play(nextfile, startposition-self.curlength)
+
+      # Update play log.
+      self._lognow("play",self.player.time_pos)
+      # TODO: Update auto save, start autosaving.
           
 
-
   def pause(self):
+    self._pause(log = True)
+
+  def _pause(self, log = False):
     if self.playing:
       self.playing = False
       if not self.player.paused:
         # Pause playback
         self.player.pause()
 
-      # TODO: Update play log.
-      # TODO: Remove temporary seek and autosave, stop autosaving.
+      # Update play log.
+      self._lognow("pause",self.player.time_pos)
+      # TODO: Remove autosave, stop autosaving.
       #pos = self.player.time_pos
 
   def playpause(self):
@@ -163,17 +179,11 @@ class AudioBook(object):
     else:
       self.play()
 
-  def seek(self,d):
-    # Make the seek
-    self.player.time_pos = Step(d)
-    # TODO: Allow seeking across files.
-
-    # TODO: Update play log after a timeout... (In the mean time store in temporary file.)
-
   def status(self):
     return  { "playing"   : self.playing
             , "directory" : self.directory
             , "curfile"   : self.curfile
+            , "curlength" : self.curlength
             , "position"  : self.player.time_pos
             , "volume"    : self.player.volume
             , "speed"     : self.player.speed
@@ -201,5 +211,60 @@ class AudioBook(object):
         return None
     except ValueError:
       return None
+
+  def getlog(self):
+    return self.playlog
+
+  def _autolognow(self):
+    pos = self.player.time_pos
+    if pos != None and self.curfile != None:
+      walltime = time.time()
+      data = map(str, (walltime, "auto", pos, self.curfile))
+      path = join(self.directory,self.autologfile)
+      line = string.join(data)
+      try:
+        with open(path,'wb') as f:
+          f.write(line)
+          f.flush()
+          os.fsync(f.fileno())
+      except:
+        # Do not retry. Autosaving will be done again soon anyway.
+        pass 
+        # TODO: Notify user of failure?
+    else:
+      self._autologstop()
+
+  def _autologstop(self):
+    os.remove(self.autologfile)
+
+  def _lognow(self,event,pos):
+    assert self.curfile != None, 'Curfile not set when writing to the play log.'
+    assert len(event.split()) == 1, 'The event name used when writing to log must be exactly one word.'
+    walltime = time.time()
+    self._rawlog(map(str, (walltime, event, pos, self.curfile)))
+
+  def _rawlog(self,data):
+    assert len(data) == 4, "_rawlog takes a tuple of 4 elements."
+    path = join(self.directory,self.playlogfile)
+    self.playlog.append(data)
+    line = string.join(data)
+    try:
+      with open(path,'ab') as f:
+        f.write(line)
+        f.flush()
+        os.fsync(f.fileno())
+    except:
+      pass
+      # TODO: Notify user of failure?
+      # TODO: Retry write.
+
+  def _loadlog(self,logfile):
+    path = join(self.directory,logfile)
+    try:
+      with open(path,'rb') as f:
+        lines = f.readlines()
+      return map(lambda line: tuple(line.split(' ',3)), lines)
+    except:
+      return []
 
 ab = AudioBook("testbook")
