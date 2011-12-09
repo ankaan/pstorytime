@@ -25,10 +25,21 @@ import gobject
 from pstorytime.repeatingtimer import RepeatingTimer
 
 class LogEntry(gobject.GObject):
-  walltime = gobject.property(type=int, minimum=0)
-  event = gobject.property(type=str)
-  position = gobject.property(type=int, minimum=0)
-  filename = gobject.property(type=str)
+  @gobject.property
+  def walltime(self):
+    return self._walltime
+
+  @gobject.property
+  def event(self):
+    return self._event
+
+  @gobject.property
+  def position(self):
+    return self._position
+
+  @gobject.property
+  def filename(self):
+    return self._filename
 
   @staticmethod
   def parse(line):
@@ -45,16 +56,13 @@ class LogEntry(gobject.GObject):
 
   def __init__(self,walltime,event,position,filename):
     gobject.GObject.__gobject_init__(self)
-    self.walltime = int(walltime)
-    self.event = event
-    self.position = int(position)
-    self.filename = filename
+    self._walltime = int(walltime)
+    self._event = event
+    self._position = int(position)
+    self._filename = filename
 
   def __str__(self):
-    return "{walltime} {event} {position} {filename}".format( walltime = self.walltime,
-                                                              event = self.event,
-                                                              position = self.position,
-                                                              filename = self.filename)
+    return "{e.walltime} {e.event} {e.position} {e.filename}".format(e=self)
 
 class Log(object):
   def __init__(self,bus,player,directory,playlog_file,autolog_file,autolog_interval):
