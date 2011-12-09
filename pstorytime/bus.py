@@ -17,13 +17,17 @@
 # You should have received a copy of the GNU General Public License
 # along with pstorytime.  If not, see <http://www.gnu.org/licenses/>.
 
-__version__ = "0.1"
-__author__ = "Anders Engström <ankan@ankan.eu>"
-__all__ = [
-    'AudioBook',
-    'Config',
-    'LogEntry'
-    ]
+from gobject import *
 
-from pstorytime.audiobook import AudioBook, Config
-from pstorytime.log import LogEntry
+class Bus(GObject):
+  __gsignals__ = {
+      'eob' : (SIGNAL_RUN_LAST, TYPE_NONE, (TYPE_INT,)),
+      'eos' : (SIGNAL_RUN_LAST, TYPE_NONE, (TYPE_INT,)),
+      'error' : (SIGNAL_RUN_LAST, TYPE_NONE, (TYPE_STRING,)),
+      'filename': (SIGNAL_RUN_LAST, TYPE_NONE, (TYPE_STRING,)),
+      'playlog': (SIGNAL_RUN_LAST, TYPE_NONE, (TYPE_PYOBJECT,)),
+      'playing': (SIGNAL_RUN_LAST, TYPE_NONE, (TYPE_BOOLEAN,))
+    }
+
+  def __init__(self):
+    GObject.__init__(self)

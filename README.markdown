@@ -1,7 +1,7 @@
 pstorytime
 ----------
 
-pstorytime is a console audiobook player written in python. It uses [python-mplayer](http://code.google.com/p/python-mplayer/) to communicate with [mplayer](http://www.mplayerhq.hu) that is used as backend.
+pstorytime is a audiobook API/console player written in python based on gstreamer.
 
 Installation
 ------------

@@ -17,275 +17,180 @@
 # You should have received a copy of the GNU General Public License
 # along with pstorytime.  If not, see <http://www.gnu.org/licenses/>.
 
-import os
-import string
-import time
+from os.path import normcase, expanduser, isfile, join
 import threading
-from os.path import *
+import mimetypes
 
-from mplayer import *
-from pstorytime import *
+from pstorytime.bus import Bus
+from pstorytime.log import Log
+import pstorytime.player
+
+class Config(object):
+  def __init__(self):
+    self.playlog_file = None         # Becomes: ".playlogfile"
+    self.autolog_file = None         # Becomes self.playlogfile + ".auto"
+    self.extra_extensions = ["m4b"] # Not so uncommon audiobook format that is essentially a renamed m4a
+    self.autolog_interval = 60      # In seconds
 
 class AudioBook(object):
-  def __init__(self,directory):
+  SECOND = pstorytime.player.Player.SECOND
+
+  def __init__(self,conf,directory):
     self.lock = threading.RLock()
-    with self.lock:
-      self.directory = normcase(expanduser(directory))
-      self.curfile = None
-      self.curlength = 0.0
-      if not isdir(directory):
-        e = IOError()
-        e.errno = 2
-        e.strerror = "No such file or directory"
-        e.filename = directory
-        raise e
+    self._playing = False
 
-      self.playlogfile = ".pstorylog"
-      self.autologfile = self.playlogfile+".auto"
+    self._conf = conf
+    self._directory = normcase(expanduser(directory))
+    
+    self.bus = Bus()
+    self._player = pstorytime.player.Player(self.bus,self._directory)
+    self._log = Log(self.bus,
+                    self._player,
+                    self._directory,
+                    self._conf.playlog_file,
+                    self._conf.autolog_file,
+                    self._conf.autolog_interval)
 
-      # Load play log from file.
-      self.playlog = self._loadlog(self.playlogfile)
+    self.bus.connect("eos",self._on_eos)
 
-      # Merge in old auto save (should only be there if last session crashed while playing.)
-      if isfile(self.autologfile):
-        auto = self._loadlog(self.autologfile)
-        if len(auto)==1:
-          self._rawlog(auto[0])
-        os.remove(self.autologfile)
-
-      self.playing = False
-
-      # Set up mplayer.
-      self.player = Player(stdout=PIPE, stderr=PIPE, autospawn=False)
-
-
-      ### Beginning of ugly hack. ################################
-      baseargs = self.player._base_args
-
-      # "-really-quiet" changed to "-quiet" (needed to spot when mplayer fails to load files.)
-      try:
-        i = baseargs.index("-really-quiet")
-        baseargs = baseargs[:i] + ("-quiet",) + baseargs[i+1:]
-      except ValueError:
-        pass
-
-      # "-noconfig all" removed all together (we want to use ordinary mplayer config.)
-      for i in xrange(0,len(baseargs)-1):
-        if baseargs[i] == "-noconfig" and baseargs[i+1] == "all":
-          baseargs = baseargs[:i] + baseargs[i+2:]
-          break
-
-      self.player._base_args = baseargs
-      ### End of ugly hack. ######################################
-
-
-      # Fix args.
-      self.player.args = ['-msglevel', 'global=6', '-include', '~/.pstorytime/mplayer.conf']
-
-      self.player.stdout.connect(self._handle_stdout)
-      self.player.stderr.connect(self._handle_stderr)
-
-      self.player.spawn()
-
-  # Listen for events from mplayer.
-  def _handle_stdout(self,data):
-    print("stdout: {0}".format(data))
-    if data == 'Starting playback...':
-      self._startComplete()
-    elif data.startswith('EOF code:'):
-      self._fileDone()
-
-  def _handle_stderr(self,data):
-    print("stderr: {0}".format(data))
-    if data == 'Failed to recognize file format.':
-      self._fileDone()
-
-  def _fileDone(self):
-    nextfile = self.getFile(1)
-    if nextfile != None:
-      self._play(nextfile)
-    else:
-      self._endOfBook()
-
-  def _endOfBook(self):
-    self._lognow("end",self.curlength)
-
-  def _startComplete(self):
-    pass
-
-  def listFiles(self):
-    entries = os.listdir(self.directory)
-    entries.sort()
-    return filter(lambda e: isfile(join(self.directory,e)),entries)
-
-  def play(self, startfile = None, startpos = None):
-    return self._play(startfile, startpos, log=True)
-
-  def _play(self, startfile = None, startpos = None, log = False):
-    if (not self.playing) or startfile != None or startpos != None:
-      self._pause(log = log)
-      self.playing = True
-
-      # Load state from play log
-      if startfile == None and self.curfile == None:
-        # Try to load last state from play log.
-        if len(self.playlog) > 0:
-          (_,_,pos,startfile) = self.playlog[-1]
-          if startpos == None:
-            startpos = pos
-        # Or if the play log is empty, play the first file in the book.
+  def _on_eos(self,verify_id):
+    with self._lock:
+      # Verify that it is still valid: the state of the player could have
+      # changed while waiting at the lock.
+      if self._player.verify_eos(verify_id):
+        # The player reported an end of stream, go to next file.
+        next_file = self.get_file(1)
+        if next_file != None:
+          self._play(next_file)
         else:
-          files = self.listFiles()
-          if len(files) > 0:
-            startfile = files[0]
-      
-      # Change file
-      if startfile != None:
-        self.curfile = startfile
+          self.bus.emit("eob",verify_id)
+          
+  def verify_eob(self,verify_id):
+    return self._player.verify_eos(verify_id)
 
-      # Load file if necessary, otherwise unpause if not playing anything.
-      if self.curfile != self.player.filename:
-        path = join(self.directory,self.curfile)
-        self.player.loadfile(path)
-      elif self.player.paused:
-        self.player.pause()
+  def _play(self, startfile = None, startpos=None, log=False, seek=False):
+    with self._lock:
+      # Make sure we are not playing anything.
+      self._pause(log=log, seek=seek)
 
-      self.curlength = self.player.length
+      # Is this a seek while the player is paused?
+      paused_seek = seek and not self._playing
 
-      # Set position in file.
-      if startpos != None:
-        if startpos < -self.curlength:
-          # Position is in a file further back
-          prevfile = self._getFile(-1)
-          if prevfile == None:
-            # Start playing where we are, in the beginning of the first file.
-            pass
-          else:
-            self._play(prevfile, self.curlength-startpos)
-        elif startpos < 0:
-          # Position relative to the end of the file
-          self.player.time_pos = self.curlength-startpos
-        elif startpos < self.curlength:
-          # Position relative to the beginning of the file
-          self.player.time_pos = startpos
+      # Filename loaded before doing all this.
+      old_file = self._player.filename()
+
+      if old_file == None and startfile == None:
+        # First play, and no file given.
+        # Try to load last entry from play log.
+        playlog = self._log.getlog()
+        if len(playlog)>0:
+          startfile = playlog[-1].filename
+          if startpos==None:
+            startpos = playlog[-1].position
         else:
-          # Position is in a file further on
-          nextfile = self._getFile(1)
-          if nextfile == None:
-            self._endOfBook()
+          # Otherwise use first file in directory.
+          dirlist = self.list_files()
+          if len(dirlist)>0:
+            startfile = dirlist[0]
           else:
-            self._play(nextfile, startpos-self.curlength)
-
-      # Update play log.
-      self._lognow("start",self.player.time_pos)
-      # TODO: Update auto save, start autosaving.
+            # Nothing to play!
+            self.bus.emit("error","No valid files in audiobook directory.")
           
 
+      if startfile != None and startfile != old_file:
+        # Try to load new file.
+        if not self._player.load(startfile):
+          # Failed to load file.
+          self._log.stop(seek=seek, loadfail=True)
+          self.bus.emit("playing",False)
+          self._playing = False
+          return False
+
+      if startpos != None:
+        self._player.seek(startpos)
+
+      if log:
+        # Log "destination", don't start autologging if this is a paused seek.
+        self._log.start(seek=seek, autolog=(not paused_seek))
+
+      if not paused_seek:
+        self._player.play()
+
+      self.bus.emit("playing",True)
+      self._playing = True
+      return True
+
+  def _pause(self, log=False, seek=False):
+    with self._lock:
+      if self._playing:
+        self._playing = False
+        self._player.pause()
+        if log:
+          self._log.stop(seek=seek)
+        self.bus.emit("playing",False)
+
+  def play(self, startfile=None, startpos=None):
+    with self.lock:
+      if (not self._playing) or startfile != None or startpos != None:
+        return self._play(startfile, startpos, log=True)
+
+  def seek(self, startfile=None, startpos=None):
+    with self.lock:
+      return self._play(startfile, startpos, log=True, seek=True)
+
   def pause(self):
-    self._pause(log = True)
+    with self._lock:
+      self._pause(log=True)
 
-  def _pause(self, log = False):
-    if self.playing:
-      self.playing = False
-      if not self.player.paused:
-        # Pause playback
-        self.player.pause()
+  def play_pause(self):
+    with self._lock:
+      if self._playing:
+        self.pause()
+      else:
+        self.play()
 
-      # Update play log.
-      self._lognow("stop",self.player.time_pos)
-      # TODO: Remove autosave, stop autosaving.
-      #pos = self.player.time_pos
+  def position(self):
+    with self._lock:
+      return self._player.position()
 
-  def playpause(self):
-    if self.playing:
-      self.pause()
-    else:
-      self.play()
+  def list_files(self):
+    with self._lock:
+      entries = os.listdir(self._directory)
+      entries.sort()
+      return filter(self._is_audio_file, entries)
+  
+  def _is_audio_file(self,filename):
+    with self._lock:
+      if not isfile(join(self._directory,filename)):
+        return False
 
-  def status(self):
-    return  { "playing"   : self.playing
-            , "directory" : self.directory
-            , "curfile"   : self.curfile
-            , "curlength" : self.curlength
-            , "position"  : self.player.time_pos
-            , "volume"    : self.player.volume
-            , "speed"     : self.player.speed
-            }
+      exts = tuple(map(lambda e: '.'+e, self._conf.extra_extensions))
+      if filename.endswith(exts):
+        return True
 
-  def vol(self,v):
-    self.player.volume = v
+      (mime, _) = mimetypes.guess_type(filename)
+      if mime != None:
+        data = mime.split("/",1)
+        return len(data)==2 and data[0] == "audio"
+      else:
+        return False
 
-  def dvol(self,dv):
-    self.player.volume = Step(dv)
-
-  def speed(self,s):
-    self.player.speed = s
-
-  def dspeed(self,ds):
-    self.player.speed = Step(ds)
-
-  def getFile(self,d):
+  def get_file(self,delta):
     try:
-      files = self.listFiles()
+      files = self.list_files()
       i = files.index(self.curfile)
-      if 0 < i+d <= len(files):
-        return files[i+d]
+      if 0 < i+delta <= len(files):
+        return files[i+delta]
       else:
         return None
     except ValueError:
       return None
 
   def getlog(self):
-    return self.playlog[:]
+    return self._log.getlog()
 
-  def _autolognow(self):
-    pos = self.player.time_pos
-    if pos != None and self.curfile != None:
-      walltime = time.time()
-      data = map(str, (walltime, "auto", pos, self.curfile))
-      path = join(self.directory,self.autologfile)
-      line = string.join(data)
-      try:
-        with open(path,'wb') as f:
-          f.write(line)
-          f.flush()
-          os.fsync(f.fileno())
-      except:
-        # Do not retry. Autosaving will be done again soon anyway.
-        pass 
-        # TODO: Notify user of failure?
-    else:
-      self._autologstop()
+  def gst(self):
+    return self._player.gst
 
-  def _autologstop(self):
-    os.remove(self.autologfile)
-
-  def _lognow(self,event,pos):
-    assert self.curfile != None, 'Curfile not set when writing to the play log.'
-    assert len(event.split()) == 1, 'The event name used when writing to log must be exactly one word.'
-    walltime = time.time()
-    self._rawlog(map(str, (walltime, event, pos, self.curfile)))
-
-  def _rawlog(self,data):
-    assert len(data) == 4, "_rawlog takes a tuple of 4 elements."
-    path = join(self.directory,self.playlogfile)
-    self.playlog.append(data)
-    line = string.join(data)+"\n"
-    try:
-      with open(path,'ab') as f:
-        f.write(line)
-        f.flush()
-        os.fsync(f.fileno())
-    except:
-      pass
-      # TODO: Notify user of failure?
-      # TODO: Retry write.
-
-  def _loadlog(self,logfile):
-    path = join(self.directory,logfile)
-    try:
-      with open(path,'rb') as f:
-        lines = f.readlines()
-      return map(lambda line: tuple(line.split(' ',3)), lines)
-    except:
-      return []
+  def destroy(self):
+    self._log.destroy()

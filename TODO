@@ -1,0 +1,10 @@
+* Redesign signals/properties
+* Playing signal
+* Put things together in audiobook.py.
+* Simple console UI.
+* More advanced ncurses UI.
+* Maybe a simple GTK UI in the future. (Could alse be released as a PND.)
+* Build scripts.
+* Scripts to build .deb.
+* Doc-comments!
+* Comments...
