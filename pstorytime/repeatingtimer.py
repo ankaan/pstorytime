@@ -32,8 +32,7 @@ class RepeatingTimer(object):
     self._state = "stopped"
     self._cond = threading.Condition()
 
-    self._thread = threading.Thread(target=self.run)
-    self._thread.name = "RepeatingTimerThread"
+    self._thread = threading.Thread(target=self.run,name="RepeatingTimerThread")
     self._thread.start()
 
     self._begin = None

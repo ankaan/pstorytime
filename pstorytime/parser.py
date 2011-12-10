@@ -18,15 +18,24 @@
 # along with pstorytime.  If not, see <http://www.gnu.org/licenses/>.
 
 from threading import Thread, Event
+from gst import SECOND
+import gobject
 
-class CmdParser(object):
+class CmdParser(gobject.GObject):
+  __gsignals__ = {
+    'quit' : (gobject.SIGNAL_RUN_LAST,
+              gobject.TYPE_NONE,
+              (gobject.TYPE_BOOLEAN,))
+  }
+
   def __init__(self,audiobook,handler=None):
+    gobject.GObject.__init__(self)
     self._audiobook = audiobook
     self._quit = Event()
     if handler != None:
-      Thread(target=self._reader,args=(handler,)).start()
+      Thread(target=self._reader,args=(handler,),name="CmdParser").start()
 
-  def quit(self,handler):
+  def quit(self):
     self._quit.set()
 
   def _reader(self,handler):
@@ -46,20 +55,20 @@ class CmdParser(object):
         cmd = data[0]
 
         if cmd=="play":
-          start_file = self.parse_file(data)
-          start_pos = self.parse_pos(data)
+          start_file = self.get_file(data)
+          start_pos = self.get_pos(data)
           ab.play(start_file=start_file,start_pos=start_pos)
 
         if cmd=="pause":
           ab.pause()
 
         if cmd=="seek":
-          start_file = self.parse_file(data)
-          start_pos = self.parse_pos(data)
+          start_file = self.get_file(data)
+          start_pos = self.get_pos(data)
           ab.seek(start_file=start_file,start_pos=start_pos)
 
         if cmd=="dseek" and len(data)==2:
-          delta = self.parse_pos(data)
+          delta = self.get_pos(data)
           if delta != None:
             ab.dseek(delta)
 
@@ -73,50 +82,53 @@ class CmdParser(object):
           ab.play_pause()
 
         if cmd=="quit" and len(data)==1:
-          ab.destroy()
-          self.quit()
+          self.emit("quit",False)
       except Exception as e:
         pass
 
-  def parse_file(self,data):
+  def get_file(self,data):
     if len(data)>=3:
       return " ".join(data[1:-1])
     else:
       return None
 
-  def parse_pos(self,data):
+  def get_pos(self,data):
     if len(data)>=2:
-      raw = data[-1]
-      
-      # Take care of negative positions
-      if raw[0] == "-":
-        sign = -1
-        raw = raw[1:]
-      elif raw[0] == "+":
-        sign = 1
-        raw = raw[1:]
-      else:
-        sign = 1
-
-      for c in raw:
-        if c not in ":0123456789":
-          raise Exception()
-
-      parts = raw.split(":")
-
-      seconds = 0
-      minutes = 0
-      hours = 0
-
-      if len(parts) >= 1:
-        seconds = int(parts[-1])
-      if len(parts) >= 2:
-        minutes = int(parts[-2])
-      if len(parts) >= 3:
-        hours = int(parts[-3])
-      if len(parts) > 3:
+      pos = parse_pos(data[-1])
+      if pos == None:
         raise Exception()
-
-      return sign * ((hours*60 + minutes)*60 + seconds) * self._audiobook.SECOND
+      return pos
     else:
       return None
+
+def parse_pos(raw):
+  # Take care of negative positions
+  if raw[0] == "-":
+    sign = -1
+    raw = raw[1:]
+  elif raw[0] == "+":
+    sign = 1
+    raw = raw[1:]
+  else:
+    sign = 1
+
+  for c in raw:
+    if c not in ":0123456789":
+      return None
+
+  parts = raw.split(":")
+
+  seconds = 0
+  minutes = 0
+  hours = 0
+
+  if len(parts) >= 1:
+    seconds = int(parts[-1])
+  if len(parts) >= 2:
+    minutes = int(parts[-2])
+  if len(parts) >= 3:
+    hours = int(parts[-3])
+  if len(parts) > 3:
+    return None
+
+  return sign * ((hours*60 + minutes)*60 + seconds) * SECOND

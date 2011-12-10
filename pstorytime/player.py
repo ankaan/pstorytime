@@ -143,3 +143,7 @@ class Player(gobject.GObject):
   def filename(self):
     with self._lock:
       return self._filename
+
+  def quit(self):
+    with self._lock:
+      self.gst.set_state(gst.STATE_NULL)

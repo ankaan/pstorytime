@@ -17,7 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with pstorytime.  If not, see <http://www.gnu.org/licenses/>.
 
-from os.path import normcase, abspath, expanduser, join, isfile, dirname, isdir
+from os.path import abspath, expanduser, join, isfile, dirname, isdir
 import os
 import threading
 import time
@@ -113,7 +113,7 @@ class Log(gobject.GObject):
           self._logentry(auto[0])
       os.remove(self._autolog_file)
 
-  def destroy(self):
+  def quit(self):
     self._autologtimer.destroy()
 
   def start(self, seek=False, autolog=True):

@@ -27,7 +27,7 @@ class PosWriter(object):
     self._timeout = timeout
     self._quit = Event()
     self._running = Event()
-    Thread(target=self._writer,kwargs={"handler":handler, "filename":filename}).start()
+    Thread(target=self._writer,kwargs={"handler":handler, "filename":filename},name="PosWriter").start()
     self._audiobook.connect("notify::playing",self._on_playing)
 
   def _on_playing(self,ab,property):

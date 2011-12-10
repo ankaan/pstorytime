@@ -260,6 +260,7 @@ class AudioBook(gobject.GObject):
   def gst(self):
     return self._player.gst
 
-  def destroy(self):
+  def quit(self):
     with self._lock:
-      self._log.destroy()
+      self._log.quit()
+      self._player.quit()
