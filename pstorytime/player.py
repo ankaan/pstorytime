@@ -27,7 +27,10 @@ import gobject
 class Player(gobject.GObject):
   SECOND = gst.SECOND
 
-  eos = gobject.property(type=bool,default=False)
+  @gobject.property
+  def eos(self):
+    with self._lock:
+      return self._eos
 
   def __init__(self,bus,directory):
     gobject.GObject.__init__(self)
@@ -67,11 +70,13 @@ class Player(gobject.GObject):
       t = message.type
       if t == gst.MESSAGE_EOS and clear_eos_count == self._clear_eos_count:
         self.gst.set_state(gst.STATE_NULL)
-        self.eos = True
+        self._eos = True
+        self.notify("eos")
 
   def _clear_eos(self):
     with self._lock:
-      self.eos = False
+      self._eos = False
+      self.notify("eos")
       self._gstbus.disconnect(self._on_eos_id)
       self._clear_eos_count += 1
       self._on_eos_id = self._gstbus.connect( "message"
@@ -100,8 +105,9 @@ class Player(gobject.GObject):
 
   def play(self):
     with self._lock:
-      if self.eos:
-        self.eos = True
+      if self._eos:
+        self._eos = True
+        self.notify("eos")
       else:
         self._hasplayed = True
         self.gst.set_state(gst.STATE_PLAYING)

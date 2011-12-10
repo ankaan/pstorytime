@@ -1,10 +1,6 @@
-* Verify how GOBject callbacks works:
-  * Lists saved as "objects": Is obj in callback a reference to the original data?
-  * If a property is set to the same value, is a notification sent?
 * Jump to other files if trying to play outside a given file.
   * Threshold when seeking backwards?
   * Snap to beginning of file when seeking forward?
-* Simple play at EOB starts playing at beginning of first file.
 * Simple console UI.
 * More advanced ncurses UI.
 * Maybe a simple GTK UI in the future. (Could also be released as a PND.)

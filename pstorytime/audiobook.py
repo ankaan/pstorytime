@@ -28,10 +28,12 @@ import pstorytime.player
 
 class Config(object):
   def __init__(self):
-    self.playlog_file = None         # Becomes: ".playlogfile"
-    self.autolog_file = None         # Becomes self.playlogfile + ".auto"
-    self.extra_extensions = ["m4b"] # Not so uncommon audiobook format that is essentially a renamed m4a
-    self.autolog_interval = 60      # In seconds
+    self.log_prefix = "~/.pstorytime/logs"  # Place all logs relative to this directory.
+    self.playlog_file = None                # Becomes: ".playlogfile"
+    self.autolog_file = None                # Becomes self.playlogfile + ".auto"
+    self.core_extensions = ["m4b"]          # Basically same as "m4a"
+    self.extra_extensions = []
+    self.autolog_interval = 60              # In seconds
 
 class AudioBook(gobject.GObject):
   SECOND = pstorytime.player.Player.SECOND
@@ -42,16 +44,32 @@ class AudioBook(gobject.GObject):
                 (gobject.TYPE_STRING,))
   }
 
-  playing = gobject.property(type=bool,default=False)
-  eob = gobject.property(type=bool,default=False)
-  filename = gobject.property(type=str)
-  playlog = gobject.property(type=object)
+  @gobject.property
+  def playing(self):
+    with self._lock:
+      return self._playing
+
+  @gobject.property
+  def eob(self):
+    with self._lock:
+      return self._eob
+
+  @gobject.property
+  def filename(self):
+    with self._lock:
+      return self._filename
+
+  @gobject.property
+  def playlog(self):
+    with self._lock:
+      return self._log.playlog
 
   def __init__(self,conf,directory):
     gobject.GObject.__init__(self)
     self._lock = threading.RLock()
     with self._lock:
-      self.playing = False
+      self._playing = False
+      self.notify("playing")
 
       self._conf = conf
       self._directory = normcase(expanduser(directory))
@@ -62,18 +80,18 @@ class AudioBook(gobject.GObject):
       self._log = Log(self,
                       self._player,
                       self._directory,
+                      self._conf.log_prefix,
                       self._conf.playlog_file,
                       self._conf.autolog_file,
                       self._conf.autolog_interval)
-      self.playlog = self._log.playlog
       self._log.connect("notify::playlog",self._on_playlog)
 
-      self.filename = ""
+      self._filename = None
 
       # Try to load last entry from play log.
-      if len(self.playlog)>0:
-        start_file = self.playlog[-1].filename
-        start_pos = self.playlog[-1].position
+      if len(self._log.playlog)>0:
+        start_file = self._log.playlog[-1].filename
+        start_pos = self._log.playlog[-1].position
         self._play(start_file, start_pos, log=False, seek=True)
       else:
         # Otherwise use first file in directory.
@@ -87,7 +105,7 @@ class AudioBook(gobject.GObject):
 
   def _on_playlog(self,log,property):
     with self._lock:
-      self.playlog = log.playlog
+      self.notify("playlog")
 
   def _on_eos(self,player,property):
     with self._lock:
@@ -98,32 +116,32 @@ class AudioBook(gobject.GObject):
           self._play(next_file)
         else:
           # No next file, we are at the end of the book.
-          self.eob = True
-          self.playing = False
+          self._eob = True
+          self.notify("eob")
+          self._playing = False
+          self.notify("playing")
           self._log.stop(custom="eob")
 
   def _play(self, start_file=None, start_pos=None, pos_relative_end=False, log=False, seek=False):
     with self._lock:
-      self.eob = False
+      self._eob = False
+      self.notify("eob")
 
       # Is this a seek while the player is paused?
-      paused_seek = seek and (not self.playing)
+      paused_seek = seek and (not self._playing)
 
       # Make sure we are not playing anything.
       self._pause(log=log, seek=seek)
 
-      if self.filename == "":
-        old_file = None
-      else:
-        old_file = self.filename
-    
-      if start_file != None and start_file != old_file:
+      if start_file != None and start_file != self._filename:
         # Try to load new file.
-        self.filename = start_file
+        self._filename = start_file
+        self.notify("filename")
         if not self._player.load(start_file):
           # Failed to load file.
           self._log.stop(custom="loadfail")
-          self.playing = False
+          self._playing = False
+          self.notify("playing")
           return False
 
       if start_pos != None:
@@ -157,22 +175,24 @@ class AudioBook(gobject.GObject):
         self._log.start(seek=seek, autolog=(not paused_seek))
 
       if not paused_seek:
-        self.playing = True
+        self._playing = True
+        self.notify("playing")
         self._player.play()
 
       return True
 
   def _pause(self, log=False, seek=False):
     with self._lock: 
-      if self.playing:
-        self.playing = False
+      if self._playing:
+        self._playing = False
+        self.notify("playing")
         self._player.pause()
         if log:
           self._log.stop(seek=seek)
 
   def play(self, start_file=None, start_pos=None):
     with self._lock:
-      if (not self.playing) or start_file != None or start_pos != None:
+      if (not self._playing) or start_file != None or start_pos != None:
         return self._play(start_file, start_pos, log=True)
 
   def seek(self, start_file=None, start_pos=None):
@@ -190,7 +210,7 @@ class AudioBook(gobject.GObject):
 
   def play_pause(self):
     with self._lock:
-      if self.playing:
+      if self._playing:
         self.pause()
       else:
         self.play()
@@ -214,7 +234,8 @@ class AudioBook(gobject.GObject):
       if not isfile(join(self._directory,filename)):
         return False
 
-      exts = tuple(map(lambda e: '.'+e, self._conf.extra_extensions))
+      exts = self._conf.core_extensions + self._conf.extra_extensions
+      exts = tuple(map(lambda e: '.'+e, exts))
       if filename.endswith(exts):
         return True
 
@@ -228,7 +249,7 @@ class AudioBook(gobject.GObject):
   def get_file(self,delta):
     try:
       files = self.list_files()
-      i = files.index(self.filename)
+      i = files.index(self._filename)
       if 0 <= i+delta < len(files):
         return files[i+delta]
       else:

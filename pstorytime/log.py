@@ -17,7 +17,8 @@
 # You should have received a copy of the GNU General Public License
 # along with pstorytime.  If not, see <http://www.gnu.org/licenses/>.
 
-import os.path
+from os.path import normcase, abspath, expanduser, join, isfile, dirname, isdir
+import os
 import threading
 import time
 import gobject
@@ -68,9 +69,12 @@ class LogEntry(gobject.GObject):
     return "{e.walltime} {e.event} {e.filename} {e.position}".format(e=self)
 
 class Log(gobject.GObject):
-  playlog = gobject.property(type=object)
+  @gobject.property
+  def playlog(self):
+    with self._lock:
+      return self._playlog
 
-  def __init__(self,bus,player,directory,playlog_file,autolog_file,autolog_interval):
+  def __init__(self,bus,player,directory,log_prefix,playlog_file,autolog_file,autolog_interval):
     gobject.GObject.__gobject_init__(self)
     self._lock = threading.RLock()
 
@@ -79,25 +83,27 @@ class Log(gobject.GObject):
 
     if playlog_file == None:
       playlog_file = ".playlogfile"
-    self._playlog_file = os.path.expanduser(os.path.join(directory,playlog_file))
+    self._playlog_file = abspath(expanduser(join(directory,playlog_file)))
+    self._playlog_file = abspath(expanduser(join(log_prefix, self._playlog_file[1:])))
 
     if autolog_file == None:
       autolog_file = playlog_file+".auto"
-    self._autolog_file = os.path.expanduser(os.path.join(directory,autolog_file))
+    self._autolog_file = abspath(expanduser(join(directory,autolog_file)))
+    self._autolog_file = abspath(expanduser(join(log_prefix, self._autolog_file[1:])))
 
-    self.playlog = self._load(self._playlog_file)
+    self._playlog = self._load(self._playlog_file)
     self._pending = ""
 
     self._autologtimer = RepeatingTimer(autolog_interval, self._autolognow)
 
     # Merge in old auto save (should only be there if the last session crashed
     # while playing.)
-    if os.path.isfile(self._autolog_file):
+    if isfile(self._autolog_file):
       auto = self._load(self._autolog_file)
       if len(auto)==1:
         # Get walltime of last entry in playlog, if available.
-        if len(self.playlog)>0:
-          logtime = self.playlog[-1].walltime
+        if len(self._playlog)>0:
+          logtime = self._playlog[-1].walltime
         else:
           logtime = 0
         # Get walltime of entry in autolog.
@@ -129,7 +135,7 @@ class Log(gobject.GObject):
       else:
         self._lognow("stop")
       self._autologtimer.stop()
-      if os.path.isfile(self._autolog_file):
+      if isfile(self._autolog_file):
         os.remove(self._autolog_file)
 
   def _lognow(self,event):
@@ -156,16 +162,14 @@ class Log(gobject.GObject):
         event = LogEntry(walltime, 'auto', filename, position)
         line = str(event)+"\n"
         try:
-          with open(self._autolog_file,'wb') as f:
-            f.write(line)
-            f.flush()
-            os.fsync(f.fileno())
+          _write_file(self._autolog_file,'wb',line)
         except:
           self._bus.emit("error","Failed to write to auto log: {0}".format(self._autolog_file))
 
   def _logentry(self,entry):
     with self._lock:
-      self.playlog.append(entry)
+      self._playlog.append(entry)
+      self.notify("playlog")
       self._pending += str(entry)+"\n"
       self._writelog()
 
@@ -173,10 +177,16 @@ class Log(gobject.GObject):
     with self._lock:
       if self._pending != "":
         try:
-          with open(self._playlog_file,'ab') as f:
-            f.write(self._pending)
-            f.flush()
-            os.fsync(f.fileno())
-            self._pending = ""
-        except:
+          _write_file(self._playlog_file,'ab',self._pending)
+          self._pending = ""
+        except Exception as e:
           self._bus.emit("error","Failed to write to play log, data will be included in next write: {0}".format(self._playlog_file))
+
+def _write_file(filepath,writemode,data):
+  dirpath = dirname(filepath)
+  if not isdir(dirpath):
+    os.makedirs(dirpath,mode=0700)
+  with open(filepath,writemode) as f:
+    f.write(data)
+    f.flush()
+    os.fsync(f.fileno())

@@ -24,12 +24,12 @@ class CmdParser(object):
     self._audiobook = audiobook
     self._quit = Event()
     if handler != None:
-      Thread(target=self.reader,args=(handler,)).start()
+      Thread(target=self._reader,args=(handler,)).start()
 
   def quit(self,handler):
     self._quit.set()
 
-  def reader(self,handler):
+  def _reader(self,handler):
     while not self._quit.is_set():
       try:
         line = handler.readline()
@@ -42,38 +42,81 @@ class CmdParser(object):
     ab = self._audiobook
     data = line.split()
     if len(data)>0:
-      cmd = data[0]
-      if cmd=="play" and len(data)==1:
-        ab.play()
-      if cmd=="playfile" and len(data)>=2:
-        filename = " ".join(data[1:])
-        ab.play(start_file=filename)
-      if cmd=="playpos" and len(data)==2:
-        pos = int(data[1])
-        ab.play(start_pos=pos)
-      if cmd=="playfilepos" and len(data)>=3:
-        filename = int(data[1:-1])
-        pos = int(data[1:-1])
-        ab.play(start_file=filename,start_pos=pos)
-      if cmd=="pause" and len(data)==1:
-        ab.pause()
-      if cmd=="seek" and len(data)==1:
-        ab.seek()
-      if cmd=="seekfile" and len(data)>=2:
-        filename = " ".join(data[1:])
-        ab.seek(start_file=filename)
-      if cmd=="seekpos" and len(data)==2:
-        pos = int(data[1])
-        ab.seek(start_pos=pos)
-      if cmd=="seekfilepos" and len(data)>=3:
-        filename = " ".join(data[1:-1])
-        pos = int(data[-1])
-        ab.seek(start_file=filename,start_pos=pos)
-      if cmd=="dseek" and len(data)==2:
-        delta = int(data[1])
-        ab.dseek(delta)
-      if cmd=="play_pause" and len(data)==1:
-        ab.play_pause()
-      if cmd=="quit" and len(data)==1:
-        ab.destroy()
-        self.quit()
+      try:
+        cmd = data[0]
+
+        if cmd=="play":
+          start_file = self.parse_file(data)
+          start_pos = self.parse_pos(data)
+          ab.play(start_file=start_file,start_pos=start_pos)
+
+        if cmd=="pause":
+          ab.pause()
+
+        if cmd=="seek":
+          start_file = self.parse_file(data)
+          start_pos = self.parse_pos(data)
+          ab.seek(start_file=start_file,start_pos=start_pos)
+
+        if cmd=="dseek" and len(data)==2:
+          delta = self.parse_pos(data)
+          if delta != None:
+            ab.dseek(delta)
+
+        if cmd=="stepfile" and len(data)==2:
+          delta = int(data[1])
+          new_file = ab.get_file(delta)
+          if new_file!=None:
+            ab.seek(start_file=new_file)
+
+        if cmd=="play_pause" and len(data)==1:
+          ab.play_pause()
+
+        if cmd=="quit" and len(data)==1:
+          ab.destroy()
+          self.quit()
+      except Exception as e:
+        pass
+
+  def parse_file(self,data):
+    if len(data)>=3:
+      return " ".join(data[1:-1])
+    else:
+      return None
+
+  def parse_pos(self,data):
+    if len(data)>=2:
+      raw = data[-1]
+      
+      # Take care of negative positions
+      if raw[0] == "-":
+        sign = -1
+        raw = raw[1:]
+      elif raw[0] == "+":
+        sign = 1
+        raw = raw[1:]
+      else:
+        sign = 1
+
+      for c in raw:
+        if c not in ":0123456789":
+          raise Exception()
+
+      parts = raw.split(":")
+
+      seconds = 0
+      minutes = 0
+      hours = 0
+
+      if len(parts) >= 1:
+        seconds = int(parts[-1])
+      if len(parts) >= 2:
+        minutes = int(parts[-2])
+      if len(parts) >= 3:
+        hours = int(parts[-3])
+      if len(parts) > 3:
+        raise Exception()
+
+      return sign * ((hours*60 + minutes)*60 + seconds) * self._audiobook.SECOND
+    else:
+      return None
