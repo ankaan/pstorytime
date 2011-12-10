@@ -50,24 +50,40 @@ class AudioBook(gobject.GObject):
   def __init__(self,conf,directory):
     gobject.GObject.__init__(self)
     self._lock = threading.RLock()
-    self.playing = False
+    with self._lock:
+      self.playing = False
 
-    self._conf = conf
-    self._directory = normcase(expanduser(directory))
-    
-    self._player = pstorytime.player.Player(self,self._directory)
-    self._player.connect("notify::eos",self._on_eos)
+      self._conf = conf
+      self._directory = normcase(expanduser(directory))
+      
+      self._player = pstorytime.player.Player(self,self._directory)
+      self._player.connect("notify::eos",self._on_eos)
 
-    self._log = Log(self,
-                    self._player,
-                    self._directory,
-                    self._conf.playlog_file,
-                    self._conf.autolog_file,
-                    self._conf.autolog_interval)
-    self.playlog = self._log.playlog
-    self._log.connect("notify::playlog",self._on_playlog)
+      self._log = Log(self,
+                      self._player,
+                      self._directory,
+                      self._conf.playlog_file,
+                      self._conf.autolog_file,
+                      self._conf.autolog_interval)
+      self.playlog = self._log.playlog
+      self._log.connect("notify::playlog",self._on_playlog)
 
-    self.filename = ""
+      self.filename = ""
+
+      # Try to load last entry from play log.
+      if len(self.playlog)>0:
+        start_file = self.playlog[-1].filename
+        start_pos = self.playlog[-1].position
+        self._play(start_file, start_pos, log=False, seek=True)
+      else:
+        # Otherwise use first file in directory.
+        dirlist = self.list_files()
+        if len(dirlist)>0:
+          start_file = dirlist[0]
+          self._play(start_file, log=False, seek=True)
+        else:
+          # Nothing to play!
+          self.emit("error","No valid files in audiobook directory.")
 
   def _on_playlog(self,log,property):
     with self._lock:
@@ -101,23 +117,6 @@ class AudioBook(gobject.GObject):
       else:
         old_file = self.filename
     
-      if old_file == None and start_file == None:
-        # First play, and no file given.
-        # Try to load last entry from play log.
-        if len(self.playlog)>0:
-          start_file = self.playlog[-1].filename
-          if start_pos==None:
-            start_pos = self.playlog[-1].position
-            pos_relative_end = False
-        else:
-          # Otherwise use first file in directory.
-          dirlist = self.list_files()
-          if len(dirlist)>0:
-            start_file = dirlist[0]
-          else:
-            # Nothing to play!
-            self.emit("error","No valid files in audiobook directory.")
-
       if start_file != None and start_file != old_file:
         # Try to load new file.
         self.filename = start_file
@@ -158,8 +157,8 @@ class AudioBook(gobject.GObject):
         self._log.start(seek=seek, autolog=(not paused_seek))
 
       if not paused_seek:
-        self._player.play()
         self.playing = True
+        self._player.play()
 
       return True
 
