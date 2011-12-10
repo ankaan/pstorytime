@@ -83,8 +83,10 @@ class AudioBook(gobject.GObject):
         else:
           # No next file, we are at the end of the book.
           self.eob = True
+          self.playing = False
+          self._log.stop(custom="eob")
 
-  def _play(self, startfile=None, startpos=None, log=False, seek=False):
+  def _play(self, start_file=None, start_pos=None, pos_relative_end=False, log=False, seek=False):
     with self._lock:
       self.eob = False
 
@@ -98,34 +100,58 @@ class AudioBook(gobject.GObject):
         old_file = None
       else:
         old_file = self.filename
-
-      if old_file == None and startfile == None:
+    
+      if old_file == None and start_file == None:
         # First play, and no file given.
         # Try to load last entry from play log.
         if len(self.playlog)>0:
-          startfile = self.playlog[-1].filename
-          if startpos==None:
-            startpos = self.playlog[-1].position
+          start_file = self.playlog[-1].filename
+          if start_pos==None:
+            start_pos = self.playlog[-1].position
+            pos_relative_end = False
         else:
           # Otherwise use first file in directory.
           dirlist = self.list_files()
           if len(dirlist)>0:
-            startfile = dirlist[0]
+            start_file = dirlist[0]
           else:
             # Nothing to play!
             self.emit("error","No valid files in audiobook directory.")
 
-      if startfile != None and startfile != old_file:
+      if start_file != None and start_file != old_file:
         # Try to load new file.
-        self.filename = startfile
-        if not self._player.load(startfile):
+        self.filename = start_file
+        if not self._player.load(start_file):
           # Failed to load file.
-          self._log.stop(seek=seek, loadfail=True)
+          self._log.stop(custom="loadfail")
           self.playing = False
           return False
 
-      if startpos != None:
-        self._player.seek(startpos)
+      if start_pos != None:
+        duration = self.duration()
+        if pos_relative_end:
+          start_pos += duration
+        if start_pos < 0:
+          # Position in an earlier file.
+          prev_file = self.get_file(-1)
+          if prev_file == None:
+            # Already in first book!
+            start_pos = 0
+            pos_relative_end = False
+            self._player.seek(start_pos)
+          else:
+            self._play(prev_file, start_pos, pos_relative_end=True, seek=True)
+        elif start_pos < duration:
+          # Position in this file.
+          self._player.seek(start_pos)
+        else:
+          # Position in a later file.
+          next_file = self.get_file(1)
+          if next_file == None:
+            # Already in last book!
+            self._player.seek(duration)
+          else:
+            self._play(next_file, start_pos-duration, seek=True)
 
       if log:
         # Log "destination", don't start autologging if this is a paused seek.
@@ -145,14 +171,19 @@ class AudioBook(gobject.GObject):
         if log:
           self._log.stop(seek=seek)
 
-  def play(self, startfile=None, startpos=None):
+  def play(self, start_file=None, start_pos=None):
     with self._lock:
-      if (not self.playing) or startfile != None or startpos != None:
-        return self._play(startfile, startpos, log=True)
+      if (not self.playing) or start_file != None or start_pos != None:
+        return self._play(start_file, start_pos, log=True)
 
-  def seek(self, startfile=None, startpos=None):
+  def seek(self, start_file=None, start_pos=None):
     with self._lock:
-      return self._play(startfile, startpos, log=True, seek=True)
+      return self._play(start_file, start_pos, log=True, seek=True)
+
+  def dseek(self, delta):
+    with self._lock:
+      (filename,pos,_) = self.position()
+      return self._play(filename, pos+delta, log=True, seek=True)
 
   def pause(self):
     with self._lock:
@@ -168,6 +199,10 @@ class AudioBook(gobject.GObject):
   def position(self):
     with self._lock:
       return self._player.position()
+
+  def duration(self):
+    with self._lock:
+      return self._player.duration()
 
   def list_files(self):
     with self._lock:
@@ -195,7 +230,7 @@ class AudioBook(gobject.GObject):
     try:
       files = self.list_files()
       i = files.index(self.filename)
-      if 0 < i+delta <= len(files):
+      if 0 <= i+delta < len(files):
         return files[i+delta]
       else:
         return None

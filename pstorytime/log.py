@@ -120,10 +120,10 @@ class Log(gobject.GObject):
         self._autologtimer.start()
         self._autolognow()
 
-  def stop(self, seek=False, loadfail=False):
+  def stop(self, seek=False, custom=None):
     with self._lock:
-      if loadfail:
-        self._lognow("loadfail")
+      if custom!=None:
+        self._lognow(custom)
       elif seek:
         self._lognow("seekfrom")
       else:

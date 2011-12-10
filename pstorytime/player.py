@@ -100,9 +100,12 @@ class Player(gobject.GObject):
 
   def play(self):
     with self._lock:
-      self._hasplayed = True
-      self.gst.set_state(gst.STATE_PLAYING)
-      self.gst.get_state()
+      if self.eos:
+        self.eos = True
+      else:
+        self._hasplayed = True
+        self.gst.set_state(gst.STATE_PLAYING)
+        self.gst.get_state()
 
   def pause(self):
     with self._lock:
@@ -113,9 +116,6 @@ class Player(gobject.GObject):
   def seek(self,time_ns):
     with self._lock:
       self._clear_eos()
-      if time_ns < 0:
-        # If a negative position is given, seek relative to the end of the file.
-        time_ns = self._duration + time_ns
       self.gst.seek_simple(gst.FORMAT_TIME, gst.SEEK_FLAG_FLUSH, time_ns)
       self.gst.get_state()
 

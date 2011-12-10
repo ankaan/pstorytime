@@ -22,15 +22,15 @@ from threading import Thread, Event
 class CmdParser(object):
   def __init__(self,audiobook,handler=None):
     self._audiobook = audiobook
+    self._quit = Event()
     if handler != None:
       Thread(target=self.reader,args=(handler,)).start()
-    self._quit = Event()
 
   def quit(self,handler):
     self._quit.set()
 
   def reader(self,handler):
-    while not Event.is_set():
+    while not self._quit.is_set():
       try:
         line = handler.readline()
       except:
@@ -47,28 +47,31 @@ class CmdParser(object):
         ab.play()
       if cmd=="playfile" and len(data)>=2:
         filename = " ".join(data[1:])
-        ab.play(startfile=filename)
+        ab.play(start_file=filename)
       if cmd=="playpos" and len(data)==2:
         pos = int(data[1])
-        ab.play(startpos=pos)
+        ab.play(start_pos=pos)
       if cmd=="playfilepos" and len(data)>=3:
         filename = int(data[1:-1])
         pos = int(data[1:-1])
-        ab.play(startfile=filename,startpos=pos)
+        ab.play(start_file=filename,start_pos=pos)
       if cmd=="pause" and len(data)==1:
         ab.pause()
       if cmd=="seek" and len(data)==1:
         ab.seek()
       if cmd=="seekfile" and len(data)>=2:
         filename = " ".join(data[1:])
-        ab.seek(startfile=filename)
+        ab.seek(start_file=filename)
       if cmd=="seekpos" and len(data)==2:
         pos = int(data[1])
-        ab.seek(startpos=pos)
+        ab.seek(start_pos=pos)
       if cmd=="seekfilepos" and len(data)>=3:
         filename = " ".join(data[1:-1])
         pos = int(data[-1])
-        ab.seek(startfile=filename,startpos=pos)
+        ab.seek(start_file=filename,start_pos=pos)
+      if cmd=="dseek" and len(data)==2:
+        delta = int(data[1])
+        ab.dseek(delta)
       if cmd=="play_pause" and len(data)==1:
         ab.play_pause()
       if cmd=="quit" and len(data)==1:
