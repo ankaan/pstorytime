@@ -34,12 +34,12 @@ class LogEntry(gobject.GObject):
     return self._event
 
   @gobject.property
-  def position(self):
-    return self._position
-
-  @gobject.property
   def filename(self):
     return self._filename
+
+  @gobject.property
+  def position(self):
+    return self._position
 
   @staticmethod
   def parse(line):
@@ -47,25 +47,31 @@ class LogEntry(gobject.GObject):
     if len(line)>0 and line.endswith("\n"):
       line = line[:-1]
 
-    data = line.split(' ',3)
-    if len(data)==4:
-      [walltime, event, position, filename] = data
-      return LogEntry(walltime, event, position, filename)
+    data = line.split(' ')
+    if len(data)>=4:
+      walltime = data[0]
+      event = data[1]
+      filename = " ".join(data[2:-1])
+      position = data[-1]
+      return LogEntry(walltime, event, filename, position)
     else:
       return None
 
-  def __init__(self,walltime,event,position,filename):
+  def __init__(self,walltime,event,filename,position):
     gobject.GObject.__gobject_init__(self)
     self._walltime = int(walltime)
     self._event = event
-    self._position = int(position)
     self._filename = filename
+    self._position = int(position)
 
   def __str__(self):
-    return "{e.walltime} {e.event} {e.position} {e.filename}".format(e=self)
+    return "{e.walltime} {e.event} {e.filename} {e.position}".format(e=self)
 
-class Log(object):
+class Log(gobject.GObject):
+  playlog = gobject.property(type=object)
+
   def __init__(self,bus,player,directory,playlog_file,autolog_file,autolog_interval):
+    gobject.GObject.__gobject_init__(self)
     self._lock = threading.RLock()
 
     self._bus = bus
@@ -79,7 +85,7 @@ class Log(object):
       autolog_file = playlog_file+".auto"
     self._autolog_file = os.path.expanduser(os.path.join(directory,autolog_file))
 
-    self._playlog = self._load(self._playlog_file)
+    self.playlog = self._load(self._playlog_file)
     self._pending = ""
 
     self._autologtimer = RepeatingTimer(autolog_interval, self._autolognow)
@@ -90,8 +96,8 @@ class Log(object):
       auto = self._load(self._autolog_file)
       if len(auto)==1:
         # Get walltime of last entry in playlog, if available.
-        if len(self._playlog)>0:
-          logtime = self._playlog[-1].walltime
+        if len(self.playlog)>0:
+          logtime = self.playlog[-1].walltime
         else:
           logtime = 0
         # Get walltime of entry in autolog.
@@ -104,10 +110,6 @@ class Log(object):
   def destroy(self):
     self._autologtimer.destroy()
 
-  def getlog(self):
-    with self._lock:
-      return self._playlog
-
   def start(self, seek=False, autolog=True):
     with self._lock:
       if seek:
@@ -116,6 +118,7 @@ class Log(object):
         self._lognow("start")
       if autolog:
         self._autologtimer.start()
+        self._autolognow()
 
   def stop(self, seek=False, loadfail=False):
     with self._lock:
@@ -126,13 +129,14 @@ class Log(object):
       else:
         self._lognow("stop")
       self._autologtimer.stop()
-      os.remove(self._autolog_file)
+      if os.path.isfile(self._autolog_file):
+        os.remove(self._autolog_file)
 
   def _lognow(self,event):
     with self._lock:
       walltime = time.time()
       (filename,position,_) = self._player.position()
-      self._logentry(LogEntry(walltime,event,position,filename))
+      self._logentry(LogEntry(walltime,event,filename,position))
 
   def _load(self,logfile):
     with self._lock:
@@ -149,7 +153,7 @@ class Log(object):
         self._writelog()
         walltime = time.time()
         (filename,position,_) = self._player.position()
-        event = LogEntry(walltime, 'auto', position, filename)
+        event = LogEntry(walltime, 'auto', filename, position)
         line = str(event)+"\n"
         try:
           with open(self._autolog_file,'wb') as f:
@@ -161,9 +165,8 @@ class Log(object):
 
   def _logentry(self,entry):
     with self._lock:
-      self._playlog.append(entry)
+      self.playlog.append(entry)
       self._pending += str(entry)+"\n"
-      self._bus.emit("playlog",entry)
       self._writelog()
 
   def _writelog(self):

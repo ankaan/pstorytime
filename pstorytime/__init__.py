@@ -22,8 +22,6 @@ __author__ = "Anders Engström <ankan@ankan.eu>"
 __all__ = [
     'AudioBook',
     'Config',
-    'LogEntry'
     ]
 
 from pstorytime.audiobook import AudioBook, Config
-from pstorytime.log import LogEntry

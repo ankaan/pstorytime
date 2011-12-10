@@ -1,4 +1,7 @@
 * Redesign signals/properties
+* Verify how GOBject callbacks works:
+  * Lists saved as "objects": Is obj in callback a reference to the original data?
+  * If a property is set to the same value, is a notification sent?
 * Playing signal
 * Put things together in audiobook.py.
 * Simple console UI.

@@ -22,11 +22,15 @@ pygst.require("0.10")
 import gst
 import os.path
 import threading
+import gobject
 
-class Player(object):
+class Player(gobject.GObject):
   SECOND = gst.SECOND
 
+  eos = gobject.property(type=bool,default=False)
+
   def __init__(self,bus,directory):
+    gobject.GObject.__init__(self)
     self._lock = threading.RLock()
 
     self._directory = directory
@@ -45,10 +49,9 @@ class Player(object):
     self._gstbus.connect("message", self._on_message)
 
     self._clear_eos_count = 0
-    self._on_eos_id = self._gstbus.connect( "message"
-                                          , self._on_eos
-                                          , self._clear_eos_count
-                                          )
+    self._on_eos_id = self._gstbus.connect( "message", 
+                                            self._on_eos,
+                                            self._clear_eos_count)
 
   def _on_message(self, bus, message):
     with self._lock:
@@ -64,20 +67,17 @@ class Player(object):
       t = message.type
       if t == gst.MESSAGE_EOS and clear_eos_count == self._clear_eos_count:
         self.gst.set_state(gst.STATE_NULL)
-        self._bus.emit("eos",clear_eos_count)
+        self.eos = True
 
   def _clear_eos(self):
     with self._lock:
+      self.eos = False
       self._gstbus.disconnect(self._on_eos_id)
       self._clear_eos_count += 1
       self._on_eos_id = self._gstbus.connect( "message"
                                             , self._on_eos
                                             , self._clear_eos_count
                                             )
-
-  def verify_eos(self,clear_eos_count):
-    with self._lock:
-      return clear_eos_count == self._clear_eos_count
 
   def load(self,filename):
     with self._lock:
@@ -117,6 +117,7 @@ class Player(object):
         # If a negative position is given, seek relative to the end of the file.
         time_ns = self._duration + time_ns
       self.gst.seek_simple(gst.FORMAT_TIME, gst.SEEK_FLAG_FLUSH, time_ns)
+      self.gst.get_state()
 
   def position(self):
     with self._lock:
