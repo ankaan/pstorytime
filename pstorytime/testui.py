@@ -11,19 +11,16 @@ class TestUI(object):
   def __init__(self,conf,fifopath,directory):
     self._lock = RLock()
     with self._lock:
-      try:
-        self._audiobook = AudioBook(conf,directory)
-        self._parser = CmdParser(self._audiobook,fifopath=fifopath)
-        self._poswriter = PosWriter(self._audiobook,handler=sys.stdout)
+      self._audiobook = AudioBook(conf,directory)
+      self._parser = CmdParser(self._audiobook,fifopath=fifopath)
+      self._poswriter = PosWriter(self._audiobook,handler=sys.stdout)
 
-        gobject.threads_init()
-        self._mainloop = glib.MainLoop()
+      gobject.threads_init()
+      self._mainloop = glib.MainLoop()
 
-        self._audiobook.connect("notify::eob",self._on_eob)
-        self._audiobook.connect("error",self._on_error)
-        self._parser.connect("quit",self._on_quit)
-      except (KeyboardInterrupt, SystemExit):
-        self.quit()
+      self._audiobook.connect("notify::eob",self._on_eob)
+      self._audiobook.connect("error",self._on_error)
+      self._parser.connect("quit",self._on_quit)
 
   def _on_eob(self,obj,prop):
     with self._lock:
