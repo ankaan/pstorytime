@@ -42,7 +42,7 @@ class CmdParser(gobject.GObject):
     while not self._quit.is_set():
       try:
         line = handler.readline()
-      except:
+      except IOError:
         break
       self.do(line)
 
@@ -83,7 +83,7 @@ class CmdParser(gobject.GObject):
 
         if cmd=="quit" and len(data)==1:
           self.emit("quit",False)
-      except Exception as e:
+      except ParseFail as e:
         pass
 
   def get_file(self,data):
@@ -96,7 +96,7 @@ class CmdParser(gobject.GObject):
     if len(data)>=2:
       pos = parse_pos(data[-1])
       if pos == None:
-        raise Exception()
+        raise ParseFail()
       return pos
     else:
       return None
@@ -132,3 +132,6 @@ def parse_pos(raw):
     return None
 
   return sign * ((hours*60 + minutes)*60 + seconds) * SECOND
+
+class ParseFail(Exception):
+  pass

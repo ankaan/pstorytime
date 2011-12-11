@@ -150,7 +150,7 @@ class Log(gobject.GObject):
         with open(logfile,'rb') as f:
           lines = f.readlines()
         return filter(lambda e: e!=None, map(LogEntry.parse, lines))
-      except:
+      except IOError:
         return []
 
   def _autolognow(self):
@@ -163,7 +163,7 @@ class Log(gobject.GObject):
         line = str(event)+"\n"
         try:
           _write_file(self._autolog_file,'wb',line)
-        except:
+        except IOError:
           self._bus.emit("error","Failed to write to auto log: {0}".format(self._autolog_file))
 
   def _logentry(self,entry):
@@ -179,7 +179,7 @@ class Log(gobject.GObject):
         try:
           _write_file(self._playlog_file,'ab',self._pending)
           self._pending = ""
-        except Exception as e:
+        except IOError as e:
           self._bus.emit("error","Failed to write to play log, data will be included in next write: {0}".format(self._playlog_file))
 
 def _write_file(filepath,writemode,data):

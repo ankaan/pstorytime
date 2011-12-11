@@ -1,4 +1,3 @@
-* Make all except-clauses qualify which exception to catch.
 * Jump to other files if trying to play outside a given file.
   * Threshold when seeking backwards?
   * Snap to beginning of file when seeking forward?
