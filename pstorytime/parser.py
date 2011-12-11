@@ -21,7 +21,7 @@ from threading import Thread, Event
 from gst import SECOND
 import gobject
 import os
-from os.path import exists
+from os.path import exists, expanduser
 
 class CmdParser(gobject.GObject):
   __gsignals__ = {
@@ -34,7 +34,11 @@ class CmdParser(gobject.GObject):
     gobject.GObject.__init__(self)
     self._audiobook = audiobook
     self._quit = Event()
-    Thread(target=self._reader,kwargs={"handler":handler, "fifopath":fifopath},name="CmdParser").start()
+    self._thread = Thread(target=self._reader,
+                          kwargs={"handler":handler, "fifopath":fifopath},
+                          name="CmdParser")
+    self._thread.setDaemon(True)
+    self._thread.start()
 
   def quit(self):
     self._quit.set()
@@ -43,6 +47,7 @@ class CmdParser(gobject.GObject):
     if handler!=None:
       self._poller(handler)
     elif fifopath!=None:
+      fifopath = expanduser(fifopath)
       if not exists(fifopath):
         os.mkfifo(fifopath,0700)
       with open(fifopath,"r") as f:

@@ -1,47 +1,66 @@
 import gobject
 import glib
-import time
 import sys
-from threading import Thread
+from threading import RLock
 
 from pstorytime import *
 from pstorytime.parser import *
 from pstorytime.poswriter import *
 
-try:
+class TestUI(object):
+  def __init__(self,conf,fifopath,directory):
+    self._lock = RLock()
+    with self._lock:
+      try:
+        self._audiobook = AudioBook(conf,directory)
+        self._parser = CmdParser(self._audiobook,fifopath=fifopath)
+        self._poswriter = PosWriter(self._audiobook,handler=sys.stdout)
+
+        gobject.threads_init()
+        self._mainloop = glib.MainLoop()
+
+        self._audiobook.connect("notify::eob",self._on_eob)
+        self._audiobook.connect("error",self._on_error)
+        self._parser.connect("quit",self._on_quit)
+      except (KeyboardInterrupt, SystemExit):
+        self.quit()
+
+  def _on_eob(self,obj,prop):
+    with self._lock:
+      if self._audiobook.eob:
+        print("End of book.")
+
+  def _on_error(self,obj,e):
+    with self._lock:
+      print("Error: {0}".format(e))
+
+  def _on_quit(self,obj):
+    with self._lock:
+      self.quit()
+
+  def quit(self):
+    with self._lock:
+      self._audiobook.pause()
+      self._parser.quit()
+      self._poswriter.quit()
+      self._audiobook.quit()
+      self._mainloop.quit()
+
+  def run(self):
+    try:
+      self._mainloop.run()
+    except (KeyboardInterrupt, SystemExit):
+      self.quit()
+
+if __name__ == '__main__':
+  if len(sys.argv)==0:
+    print("Usage: {0} <audiobookdir>".format(sys.argv[0]))
+    sys.exit(1)
+
   directory = sys.argv[1]
-  config = Config()
-  config.autolog_interval = 5
-  config.backtrack = 10
+  
+  conf = Config()
+  conf.backtrack = 10
 
-  audiobook = AudioBook(config,directory)
-  parser = CmdParser(audiobook,fifopath="/home/ankan/.pstorytime/cmdpipe")
-
-  log_prefix = config.log_prefix
-  poswriter = PosWriter(audiobook,handler=sys.stdout)
-
-  gobject.threads_init()
-  mainloop = glib.MainLoop()
-except Exception as e:
-  print(e)
-  sys.exit(1)
-
-def on_eob(obj,prop):
-  if obj.eob:
-    print("EOB")
-
-def on_error(obj,e):
-  print("Error: {0}".format(e))
-
-def on_quit(obj):
-  audiobook.pause()
-  parser.quit()
-  poswriter.quit()
-  audiobook.quit()
-  mainloop.quit()
-
-audiobook.connect("notify::eob",on_eob)
-audiobook.connect("error",on_error)
-parser.connect("quit",on_quit)
-
-mainloop.run()
+  ui = TestUI(conf,"~/.pstorytime/cmdpipe",directory)
+  ui.run()

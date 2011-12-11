@@ -17,7 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with pstorytime.  If not, see <http://www.gnu.org/licenses/>.
 
-from threading import Thread, RLock
+from threading import RLock
 from time import strftime, time
 from datetime import timedelta
 
