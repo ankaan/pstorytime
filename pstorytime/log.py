@@ -17,13 +17,14 @@
 # You should have received a copy of the GNU General Public License
 # along with pstorytime.  If not, see <http://www.gnu.org/licenses/>.
 
-from os.path import abspath, expanduser, join, isfile, dirname, isdir
+from os.path import isfile, dirname, isdir
 import os
 import threading
 import time
 import gobject
 
 from pstorytime.repeatingtimer import RepeatingTimer
+from misc import PathGen
 
 class LogEntry(gobject.GObject):
   @gobject.property
@@ -81,15 +82,12 @@ class Log(gobject.GObject):
     self._bus = bus
     self._player = player
 
-    if playlog_file == None:
-      playlog_file = ".playlogfile"
-    self._playlog_file = abspath(expanduser(join(directory,playlog_file)))
-    self._playlog_file = abspath(expanduser(join(log_prefix, self._playlog_file[1:])))
-
+    pathgen = PathGen(directory,log_prefix)
+    self._playlog_file = pathgen.gen(playlog_file,".playlogfile")
     if autolog_file == None:
-      autolog_file = playlog_file+".auto"
-    self._autolog_file = abspath(expanduser(join(directory,autolog_file)))
-    self._autolog_file = abspath(expanduser(join(log_prefix, self._autolog_file[1:])))
+      self._autolog_file = self._playlog_file+".auto"
+    else:
+      self._autolog_file = pathgen.gen(autolog_file,".autologfile")
 
     self._playlog = self._load(self._playlog_file)
     self._pending = ""

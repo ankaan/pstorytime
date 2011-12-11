@@ -20,25 +20,35 @@
 from threading import Thread, Event
 from gst import SECOND
 import gobject
+import os
+from os.path import exists
 
 class CmdParser(gobject.GObject):
   __gsignals__ = {
     'quit' : (gobject.SIGNAL_RUN_LAST,
               gobject.TYPE_NONE,
-              (gobject.TYPE_BOOLEAN,))
+              tuple())
   }
 
-  def __init__(self,audiobook,handler=None):
+  def __init__(self,audiobook,handler=None,fifopath=None):
     gobject.GObject.__init__(self)
     self._audiobook = audiobook
     self._quit = Event()
-    if handler != None:
-      Thread(target=self._reader,args=(handler,),name="CmdParser").start()
+    Thread(target=self._reader,kwargs={"handler":handler, "fifopath":fifopath},name="CmdParser").start()
 
   def quit(self):
     self._quit.set()
 
-  def _reader(self,handler):
+  def _reader(self,handler=None,fifopath=None):
+    if handler!=None:
+      self._poller(handler)
+    elif fifopath!=None:
+      if not exists(fifopath):
+        os.mkfifo(fifopath,0700)
+      with open(fifopath,"r") as f:
+        self._poller(f)
+
+  def _poller(self,handler):
     while not self._quit.is_set():
       try:
         line = handler.readline()
@@ -76,14 +86,26 @@ class CmdParser(gobject.GObject):
           delta = int(data[1])
           new_file = ab.get_file(delta)
           if new_file!=None:
-            ab.seek(start_file=new_file)
+            ab.seek(start_file=new_file,start_pos=0)
 
         if cmd=="play_pause" and len(data)==1:
           ab.play_pause()
 
+        if cmd=="volume" and len(data)==2:
+          volume = float(data[1])
+          gst = self._audiobook.gst()
+          gst.set_property("volume",volume)
+
+        if cmd=="dvolume" and len(data)==2:
+          delta = float(data[1])
+          gst = self._audiobook.gst()
+          volume = gst.get_property("volume")
+          volume = max(0, min(volume+delta, 10))
+          gst.set_property("volume",volume)
+
         if cmd=="quit" and len(data)==1:
-          self.emit("quit",False)
-      except ParseFail as e:
+          self.emit("quit")
+      except ValueError as e:
         pass
 
   def get_file(self,data):
@@ -96,7 +118,7 @@ class CmdParser(gobject.GObject):
     if len(data)>=2:
       pos = parse_pos(data[-1])
       if pos == None:
-        raise ParseFail()
+        raise ValueError()
       return pos
     else:
       return None
@@ -132,6 +154,3 @@ def parse_pos(raw):
     return None
 
   return sign * ((hours*60 + minutes)*60 + seconds) * SECOND
-
-class ParseFail(Exception):
-  pass

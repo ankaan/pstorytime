@@ -1,6 +1,5 @@
-* Jump to other files if trying to play outside a given file.
-  * Threshold when seeking backwards?
-  * Snap to beginning of file when seeking forward?
+* Threshold when seeking backwards?
+* Snap to beginning of file when seeking forward?
 * Simple console UI.
 * More advanced ncurses UI.
 * Maybe a simple GTK UI in the future. (Could also be released as a PND.)

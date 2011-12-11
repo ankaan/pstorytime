@@ -3,7 +3,6 @@ import glib
 import time
 import sys
 from threading import Thread
-from os.path import abspath, expanduser, join
 
 from pstorytime import *
 from pstorytime.parser import *
@@ -13,15 +12,13 @@ try:
   directory = sys.argv[1]
   config = Config()
   config.autolog_interval = 5
+  config.backtrack = 10
 
   audiobook = AudioBook(config,directory)
-  parser = CmdParser(audiobook,handler=sys.stdin)
+  parser = CmdParser(audiobook,fifopath="/home/ankan/.pstorytime/cmdpipe")
 
   log_prefix = config.log_prefix
-  posdump_file = ".posdump"
-  posdump_file = abspath(expanduser(join(directory,posdump_file)))
-  posdump_file = abspath(expanduser(join(log_prefix, posdump_file[1:])))
-  poswriter = PosWriter(audiobook,filename=posdump_file)
+  poswriter = PosWriter(audiobook,handler=sys.stdout)
 
   gobject.threads_init()
   mainloop = glib.MainLoop()
@@ -36,13 +33,12 @@ def on_eob(obj,prop):
 def on_error(obj,e):
   print("Error: {0}".format(e))
 
-def on_quit(obj,error):
+def on_quit(obj):
   audiobook.pause()
   parser.quit()
   poswriter.quit()
   audiobook.quit()
   mainloop.quit()
-  print("closing session")
 
 audiobook.connect("notify::eob",on_eob)
 audiobook.connect("error",on_error)

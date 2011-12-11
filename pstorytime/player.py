@@ -97,7 +97,7 @@ class Player(gobject.GObject):
       self.gst.get_state()
       try:
         dur = self.gst.query_duration(gst.FORMAT_TIME,None)[0]
-      except QueryError:
+      except gst.QueryError:
         self._duration = 0
         return False
       self._duration = dur
@@ -129,7 +129,7 @@ class Player(gobject.GObject):
     with self._lock:
       try:
         pos = self.gst.query_position(gst.FORMAT_TIME,None)[0]
-      except QueryError:
+      except gst.QueryError:
         if self._hasplayed:
           pos = self._duration
         else:

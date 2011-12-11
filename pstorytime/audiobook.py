@@ -34,6 +34,7 @@ class Config(object):
     self.core_extensions = ["m4b"]          # Basically same as "m4a"
     self.extra_extensions = []
     self.autolog_interval = 60              # In seconds
+    self.backtrack = None                   # In seconds
 
 class AudioBook(gobject.GObject):
   SECOND = pstorytime.player.Player.SECOND
@@ -41,7 +42,10 @@ class AudioBook(gobject.GObject):
   __gsignals__ = {
     'error' : ( gobject.SIGNAL_RUN_LAST,
                 gobject.TYPE_NONE,
-                (gobject.TYPE_STRING,))
+                (gobject.TYPE_STRING,)),
+    'position' : (gobject.SIGNAL_RUN_LAST,
+                  gobject.TYPE_NONE,
+                  tuple())
   }
 
   @gobject.property
@@ -176,9 +180,10 @@ class AudioBook(gobject.GObject):
 
       if not paused_seek:
         self._playing = True
-        self.notify("playing")
         self._player.play()
+        self.notify("playing")
 
+      self.emit("position")
       return True
 
   def _pause(self, log=False, seek=False):
@@ -189,6 +194,7 @@ class AudioBook(gobject.GObject):
         self._player.pause()
         if log:
           self._log.stop(seek=seek)
+        self.emit("position")
 
   def play(self, start_file=None, start_pos=None):
     with self._lock:
@@ -206,7 +212,11 @@ class AudioBook(gobject.GObject):
 
   def pause(self):
     with self._lock:
-      self._pause(log=True)
+      if self._playing:
+        self._pause(log=True)
+        backtrack = self._conf.backtrack
+        if backtrack!=None and backtrack>0:
+          self.dseek(-backtrack*self.SECOND)
 
   def play_pause(self):
     with self._lock:
