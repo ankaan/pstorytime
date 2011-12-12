@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+"""Logging abstraction."""
+
 #
 # Copyright (C) 2011 Anders Engström <ankan@ankan.eu>
 #
@@ -17,6 +19,11 @@
 # You should have received a copy of the GNU General Public License
 # along with pstorytime.  If not, see <http://www.gnu.org/licenses/>.
 
+__all__ = [
+  'LogEntry',
+  'Log',
+  ]
+
 from os.path import isfile, dirname, isdir
 import os
 import threading
@@ -24,27 +31,34 @@ import time
 import gobject
 
 from pstorytime.repeatingtimer import RepeatingTimer
-from misc import PathGen
+from pstorytime.misc import PathGen
+from pstorytime.misc import withdoc
 
 class LogEntry(gobject.GObject):
-  @gobject.property
+  """Each event in the playlog is represented with one of these. """
+  @withdoc(gobject.property)
   def walltime(self):
+    """Walltime when the event occurred. """
     return self._walltime
 
-  @gobject.property
+  @withdoc(gobject.property)
   def event(self):
+    """What happened. (Start/stop/seek etc.) """
     return self._event
 
-  @gobject.property
+  @withdoc(gobject.property)
   def filename(self):
+    """Which filename the event occurred in. """
     return self._filename
 
-  @gobject.property
+  @withdoc(gobject.property)
   def position(self):
+    """At what position the event occurred. """
     return self._position
 
   @staticmethod
   def parse(line):
+    """Parse a line of text into a LogEntry. """
     # Remove last character if it is a newline.
     if len(line)>0 and line.endswith("\n"):
       line = line[:-1]
@@ -60,6 +74,14 @@ class LogEntry(gobject.GObject):
       return None
 
   def __init__(self,walltime,event,filename,position):
+    """Create a new LogEntry.
+    
+    Arguments:
+      walltime  At what walltime did the event occur.
+      event     What occurred.
+      filename  In what file.
+      position  At what position.
+    """
     gobject.GObject.__gobject_init__(self)
     self._walltime = int(walltime)
     self._event = event
@@ -67,21 +89,43 @@ class LogEntry(gobject.GObject):
     self._position = int(position)
 
   def __str__(self):
+    """Convert the entry back into a string. """
     return "{e.walltime} {e.event} {e.filename} {e.position}".format(e=self)
 
 class Log(gobject.GObject):
-  @gobject.property
+  @withdoc(gobject.property)
   def playlog(self):
+    """The current playlog. """
     with self._lock:
       return self._playlog
 
   def __init__(self,bus,player,directory,log_prefix,playlog_file,autolog_file,autolog_interval):
+    """Create a new log handler.
+
+    Arguments:
+      bus               Which gobject to send error events to.
+
+      player            Which object to ask the current position of.
+
+      directory         Directory of the audiobook.
+
+      log_prefix        What path to replace the first / with in the path to
+                        the playlog and autolog.
+
+      playlog_file      What playlog file to use.
+
+      autolog_file      What autolog file to use.
+
+      autolog_interval  How often to autosave position.
+    """
+
     gobject.GObject.__gobject_init__(self)
     self._lock = threading.RLock()
 
     self._bus = bus
     self._player = player
 
+    # Find out what files to log data to.
     pathgen = PathGen(directory,log_prefix)
     self._playlog_file = pathgen.gen(playlog_file,".playlogfile")
     if autolog_file == None:
@@ -112,9 +156,16 @@ class Log(gobject.GObject):
       os.remove(self._autolog_file)
 
   def quit(self):
+    """Quit the autologger, destroy everything. """
     self._autologtimer.destroy()
 
   def start(self, seek=False, autolog=True):
+    """Log entry for starting to play audiobook.
+
+    Arguments:
+      seek      Is this a seek event?
+      autolog   Should autologging be started?
+    """
     with self._lock:
       if seek:
         self._lognow("seekto")
@@ -125,6 +176,12 @@ class Log(gobject.GObject):
         self._autolognow()
 
   def stop(self, seek=False, custom=None):
+    """Log entry for stopping to play audiobook.
+
+    Arguments:
+      seek      Is this a seek event?
+      autolog   A name to use instead of the standard event names.
+    """
     with self._lock:
       if custom!=None:
         self._lognow(custom)
@@ -132,29 +189,49 @@ class Log(gobject.GObject):
         self._lognow("seekfrom")
       else:
         self._lognow("stop")
+      # Stop autologging and remove autolog file.
       self._autologtimer.stop()
       if isfile(self._autolog_file):
         os.remove(self._autolog_file)
 
   def _lognow(self,event):
+    """Log an event with the given event name at the current position and time.
+
+    Arguments:
+      event   The event type to log.
+    """
     with self._lock:
       walltime = time.time()
       (filename,position,_) = self._player.position()
       self._logentry(LogEntry(walltime,event,filename,position))
 
   def _load(self,logfile):
+    """Load log from given file.
+
+    Arguments:
+      logfile   File name to load log from.
+
+    Return:     The loaded log.
+    """
     with self._lock:
       try:
         with open(logfile,'rb') as f:
           lines = f.readlines()
+        # Parse lines and remove invalid ones.
         return filter(lambda e: e!=None, map(LogEntry.parse, lines))
       except IOError:
         return []
 
   def _autolognow(self):
+    """Save current position and such to autolog file now.
+    """
     with self._lock:
+      # Retry writing pending entries to the play log.
+      self._writelog()
+      # Make sure the autolog timer is running. The autologging could have been stopped
+      # while we were waiting at the lock.
       if self._autologtimer.started():
-        self._writelog()
+        # Update autolog
         walltime = time.time()
         (filename,position,_) = self._player.position()
         event = LogEntry(walltime, 'auto', filename, position)
@@ -165,6 +242,11 @@ class Log(gobject.GObject):
           self._bus.emit("error","Failed to write to auto log: {0}".format(self._autolog_file))
 
   def _logentry(self,entry):
+    """Log the given entry to the playlog.
+
+    Arguments:
+      entry   The entry to add.
+    """
     with self._lock:
       self._playlog.append(entry)
       self.notify("playlog")
@@ -172,6 +254,7 @@ class Log(gobject.GObject):
       self._writelog()
 
   def _writelog(self):
+    """Write all pending log entries to file. """
     with self._lock:
       if self._pending != "":
         try:
@@ -181,6 +264,13 @@ class Log(gobject.GObject):
           self._bus.emit("error","Failed to write to play log, data will be included in next write: {0}".format(self._playlog_file))
 
 def _write_file(filepath,writemode,data):
+  """Write given data to the given file.
+
+  Arguments:
+    filepath    Path to the file that is written to.
+    writemode   What mode to open the file with.
+    data        The data to write.
+  """
   dirpath = dirname(filepath)
   if not isdir(dirpath):
     os.makedirs(dirpath,mode=0700)

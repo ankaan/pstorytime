@@ -1,4 +1,7 @@
 # -*- coding: utf-8 -*-
+"""Audiobook playing abstraction that uses gstreamer as backend.
+"""
+
 #
 # Copyright (C) 2011 Anders Engström <ankan@ankan.eu>
 #
@@ -17,6 +20,11 @@
 # You should have received a copy of the GNU General Public License
 # along with pstorytime.  If not, see <http://www.gnu.org/licenses/>.
 
+__all__ = [
+  'Config',
+  'AudioBook',
+  ]
+
 import os
 from os.path import normcase, expanduser, isfile, join
 import threading
@@ -25,19 +33,81 @@ import gobject
 
 from pstorytime.log import Log
 import pstorytime.player
+from pstorytime.misc import withdoc
 
 class Config(object):
+  """Configuration for the audiobook player.
+
+  Configuration variables:
+    playlog_file        Relative path to audiobook directory, or absolute path.
+                        Default: None (Becomes: ".playlogfile")
+
+    autolog_file        Relative path to audiobook directory, or absolute path.
+                        Default: None (Becomes playlogfile + ".auto")
+
+    log_prefix          The first / in the absolute path of playlog_file and
+                        autolog_file is exchanged with the contents of this
+                        variable.
+                        Default: ~/.pstorytime/logs
+
+    core_extensions     Set of extensions recomended by the audiobook player.
+                        Change extra_extensions instead if you are not really
+                        sure what you are doing. In addition to looking at this
+                        variable and extra_extensions, the extensions
+                        associated with audio files in the system mime type
+                        database are used.
+                        Default: ["m4b"] (Basically same as "m4a")
+
+    extra_extensions    Set of additional extensions to treat as audiobook
+                        files.
+                        Default: []
+
+    autolog_interval    How often the position should be autosaved so that
+                        the position can be recovered upon crashes, including
+                        loss of power etc. (In seconds.)
+                        Default: 60
+
+    backtrack           How far to automatically backtrack after pausing. (In
+                        seconds.)
+                        Default: None (Same as 0)
+  """
+  
   def __init__(self):
-    self.log_prefix = "~/.pstorytime/logs"  # Place all logs relative to this directory.
-    self.playlog_file = None                # Becomes: ".playlogfile"
-    self.autolog_file = None                # Becomes self.playlogfile + ".auto"
-    self.core_extensions = ["m4b"]          # Basically same as "m4a"
+    self.playlog_file = None
+    self.autolog_file = None
+    self.log_prefix = "~/.pstorytime/logs"
+    self.core_extensions = ["m4b"]
     self.extra_extensions = []
-    self.autolog_interval = 60              # In seconds
-    self.backtrack = None                   # In seconds
+    self.autolog_interval = 60
+    self.backtrack = None
 
 class AudioBook(gobject.GObject):
+  """Audiobook-playing abstraction for gstreamer.
+
+  The same callback system as in gstreamer (and also GTK) is used.  Read up on
+  python gobject (or GTK if appropriate) bindings if unsure on how to use them.
+  
+  Signals:
+    error             Contains error messages as strings.
+
+    position          Contains no additional information, but signals that it
+                      is appropriate to update position information. This is
+                      done when playing, pausing and seeking (also when
+                      paused.)
+
+    notify::eob       eob property updated.
+
+    notify::filename  filename property updated.
+
+    notify::playing   playing property updated.
+
+    notify::playlog   playlog property updated.
+
+  """
+
   SECOND = pstorytime.player.Player.SECOND
+  """Time unit of a second according to gstreamer.
+  """
 
   __gsignals__ = {
     'error' : ( gobject.SIGNAL_RUN_LAST,
@@ -48,27 +118,39 @@ class AudioBook(gobject.GObject):
                   tuple())
   }
 
-  @gobject.property
+  @withdoc(gobject.property)
   def playing(self):
+    """True if the audiobook is playing. """
     with self._lock:
       return self._playing
 
-  @gobject.property
+  @withdoc(gobject.property)
   def eob(self):
+    """True if the audiobook player is currently at the end of the book. """
     with self._lock:
       return self._eob
 
-  @gobject.property
+  @withdoc(gobject.property)
   def filename(self):
+    """The currently loaded filename. """
     with self._lock:
       return self._filename
 
-  @gobject.property
+  @withdoc(gobject.property)
   def playlog(self):
+    """The current playlog containing walltime, event type, filename and
+    position. """
     with self._lock:
       return self._log.playlog
 
   def __init__(self,conf,directory):
+    """ Create the audiobook playing abstraction.
+    
+    Arguments:
+      conf        A configuration object like Config.
+      directory   Directory of the audiobook to play.
+    """
+
     gobject.GObject.__init__(self)
     self._lock = threading.RLock()
     with self._lock:
@@ -108,10 +190,22 @@ class AudioBook(gobject.GObject):
           self.emit("error","No valid files in audiobook directory.")
 
   def _on_playlog(self,log,property):
+    """The playlog was updated.
+    
+    Arguments:
+      log       The logger object.
+      property  The property object that was updated.
+    """
     with self._lock:
       self.notify("playlog")
 
   def _on_eos(self,player,property):
+    """Gstreamer reached the end of a file.
+    
+    Arguments:
+      player    The player that reached the end of a stream.
+      property  The property that was updated.
+    """
     with self._lock:
       if player.eos:
         # The player reported an end of stream, go to next file.
@@ -127,6 +221,27 @@ class AudioBook(gobject.GObject):
           self._log.stop(custom="eob")
 
   def _play(self, start_file=None, start_pos=None, pos_relative_end=False, log=False, seek=False):
+    """Internal general play abstraction.
+    
+    Arguments:
+      start_file        The file to start playing at, use None to use the
+                        current file. (Optional, defaults to None.)
+
+      start_pos         The position to start playing at in ns, use None to use
+                        the current position. (Or beginning of file if
+                        start_file was given.) (Optional, defaults to None.)
+
+      pos_relative_end  True if the length of the track should be added to
+                        start_pos.  (Optional, defaults to False)
+
+      log               True if this should be logged as an event. (Optional,
+                        defaults to False.)
+
+      seek              True if this is a seeking operation. (Optional,
+                        defaults to False.)
+
+    Returns:  True if successfull.
+    """
     with self._lock:
       self._eob = False
       self.notify("eob")
@@ -187,6 +302,12 @@ class AudioBook(gobject.GObject):
       return True
 
   def _pause(self, log=False, seek=False):
+    """Internal general pause abstraction.
+    
+    Arguments:
+      log   True if this should be logged as an event.
+      seek  True if this is part of a seek operation.
+    """
     with self._lock: 
       if self._playing:
         self._playing = False
@@ -197,20 +318,49 @@ class AudioBook(gobject.GObject):
         self.emit("position")
 
   def play(self, start_file=None, start_pos=None):
+    """Start playing the audiobook at current location, unless given another
+    location.
+
+    Arguments:
+      start_file  The file to start playing at, use None to use the current
+                  file. (Optional, defaults to None.)
+
+      start_pos   The position to start playing at in ns, use None to use the
+                  current position. (Or beginning of file if start_file was
+                  given.) (Optional, defaults to None.)
+    """
     with self._lock:
+      # Only propagate if we are not playing, or we have given a position to
+      # start playing at.
       if (not self._playing) or start_file != None or start_pos != None:
         return self._play(start_file, start_pos, log=True)
 
   def seek(self, start_file=None, start_pos=None):
+    """Seek to the given position, otherwise works the same as play.
+
+    Arguments:
+      start_file  The file to seek to, use None to indicate the current file.
+                  (Optional, defaults to None.)
+
+      start_pos   The position to seek to in ns, use None to indicatethe
+                  current position. (Or beginning of file if start_file was
+                  given.) (Optional, defaults to None.)
+    """
     with self._lock:
       return self._play(start_file, start_pos, log=True, seek=True)
 
   def dseek(self, delta):
+    """Seek relative to the current position.
+
+    Arguments:
+      delta   Positive or negative distance to seek in ns.
+    """
     with self._lock:
       (filename,pos,_) = self.position()
       return self._play(filename, pos+delta, log=True, seek=True)
 
   def pause(self):
+    """Pause audiobook now. """
     with self._lock:
       if self._playing:
         self._pause(log=True)
@@ -219,6 +369,7 @@ class AudioBook(gobject.GObject):
           self.dseek(-backtrack*self.SECOND)
 
   def play_pause(self):
+    """Toggle play/pause. """
     with self._lock:
       if self._playing:
         self.pause()
@@ -226,29 +377,48 @@ class AudioBook(gobject.GObject):
         self.play()
 
   def position(self):
+    """Get current filename, position and duration (in ns) as a tuple.
+    
+    Returns: (filename,position,duration)
+    """
     with self._lock:
       return self._player.position()
 
   def duration(self):
+    """Get the duration of the current file.
+
+    Returns:  Duration in ns.
+    """
     with self._lock:
       return self._player.duration()
 
   def list_files(self):
+    """List all audio files in audiobook directory.
+
+    Returns:  List of filenames as strings.
+    """
     with self._lock:
       entries = os.listdir(self._directory)
       entries.sort()
       return filter(self._is_audio_file, entries)
   
   def _is_audio_file(self,filename):
+    """Internal function to check if a file is to be considered an audiobook.
+
+    Returns: True if so.
+    """
     with self._lock:
       if not isfile(join(self._directory,filename)):
         return False
 
+      # Check if the filename ends with any of the given extensions.
       exts = self._conf.core_extensions + self._conf.extra_extensions
       exts = tuple(map(lambda e: '.'+e, exts))
       if filename.endswith(exts):
         return True
 
+      # Check if the mimetype database indicates sais the extension
+      # corresponds to an audio file.
       (mime, _) = mimetypes.guess_type(filename)
       if mime != None:
         data = mime.split("/",1)
@@ -257,6 +427,14 @@ class AudioBook(gobject.GObject):
         return False
 
   def get_file(self,delta):
+    """Get a file relative to the current one.
+
+    Argements:
+      delta   Adds this number to the position of the current file in the
+              audiobook directory, to get the new file.
+
+    Returns:  New filename.
+    """
     try:
       files = self.list_files()
       i = files.index(self._filename)
@@ -268,9 +446,19 @@ class AudioBook(gobject.GObject):
       return None
 
   def gst(self):
+    """Get the gstreamer playbin2 object.
+
+    Please do not touch play/pause/seek functionality, or it will seriously
+    mess things up. Though feel free to adjust volume/playback speed etc.
+
+    Returns:  Gstreamer playbin2 object.
+    """
     return self._player.gst
 
   def quit(self):
+    """Shut down the audiobook player.
+    """
     with self._lock:
+      self.pause()
       self._log.quit()
       self._player.quit()

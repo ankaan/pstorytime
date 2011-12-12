@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+"""A timer that will repeat until stopped."""
+
 #
 # Copyright (C) 2011 Anders Engström <ankan@ankan.eu>
 #
@@ -20,10 +22,21 @@
 import threading
 import time
 
-__all__ = ['RepeatingTimer']
+__all__ = [
+  'RepeatingTimer',
+  ]
 
 class RepeatingTimer(object):
+  """A timer that will repeat until stopped."""
   def __init__(self, interval, function, args=[], kwargs={}):
+    """Create the repeating timer.
+    
+    Arguments:
+      interval  How ofter to fire.
+      function  The function to run.
+      args      The arguments to the function.
+      kwargs    The keyword arguments to send to the function.
+    """
     self._interval = interval
     self._function = function
     self._args = args
@@ -32,14 +45,16 @@ class RepeatingTimer(object):
     self._state = "stopped"
     self._cond = threading.Condition()
 
-    self._thread = threading.Thread(target=self.run,
+    self._thread = threading.Thread(target=self._run,
                                     name="RepeatingTimerThread")
     self._thread.setDaemon(True)
     self._thread.start()
 
     self._begin = None
 
-  def run(self):
+  def _run(self):
+    """Wait for the next timer event to be reached and run function, rinse,
+    repeat."""
     with self._cond:
       while self._state != "destroyed":
         # Hold the timer while stopped
@@ -62,18 +77,26 @@ class RepeatingTimer(object):
             self._cond.acquire()
 
   def start(self):
+    """Start firing timer events. If already running, reset timer."""
     with self._cond:
       # Start or restart current timer.
       self._begin = time.time()
       self._set("started")
 
   def stop(self):
+    """Stop firing timer events."""
     self._set("stopped")
 
   def destroy(self):
+    """Destroy this timer by killing its thread."""
     self._set("destroyed")
 
   def _set(self,state):
+    """Set the state of the timer.
+    
+    Argements:
+      state     The new state.
+    """
     with self._cond:
       # Update state, if the timer is not destroyed.
       if self._state != "destroyed":
@@ -81,5 +104,9 @@ class RepeatingTimer(object):
         self._cond.notifyAll()
 
   def started(self):
+    """Is the timer started?
+
+    Returns:  True if the timer is started, otherwise False.
+    """
     with self._cond:
       return self._state == "started"

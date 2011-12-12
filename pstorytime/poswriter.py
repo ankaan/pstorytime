@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+"""Simple view of the audiobook player."""
+
 #
 # Copyright (C) 2011 Anders Engström <ankan@ankan.eu>
 #
@@ -23,8 +25,21 @@ from datetime import timedelta
 
 from pstorytime.repeatingtimer import RepeatingTimer
 
+__all__ = [
+  'PosWriter',
+  ]
+
 class PosWriter(object):
+  """Simple view of the audiobook player."""
+
   def __init__(self,audiobook,handler,interval=1):
+    """Create the audiobook view.
+    
+    Arguments:
+      audiobook   The audiobook object to create a view for.
+      handler     The handler to write output to.
+      interval    How often to show position while playing.
+    """
     self._lock = RLock()
     self._audiobook = audiobook
     self._handler = handler
@@ -36,6 +51,12 @@ class PosWriter(object):
     self._poll()
 
   def _on_playing(self,ab,property):
+    """Playing state updated.
+    
+    Arguments:
+      ab        The audiobook that this is a view for.
+      property  The property that was updated.
+    """
     with self._lock:
       if ab.playing and (not self._timer.started()):
         self._timer.start()
@@ -43,23 +64,38 @@ class PosWriter(object):
         self._timer.stop()
 
   def _on_position(self,ab):
+    """A hint has been received that it is a good idea to update the position information.
+    
+    Arguments:
+      ab        The audiobook that this is a view for.
+    """
     with self._lock:
+      # Poll now, and delay the next poll.
       self._poll()
       if self._timer.started():
         self._timer.start()
 
   def _on_volume(self,gst,property):
+    """The volume has been changed.
+    
+    Arguments:
+      gst       The gstreamer bus.
+      property  The property that was updated.
+    """
     with self._lock:
+      # Poll now, and delay the next poll.
       self._poll()
       if self._timer.started():
         self._timer.start()
 
   def quit(self):
+    """Destroy everything."""
     with self._lock:
       self._poll()
       self._timer.destroy()
         
   def _poll(self):
+    """Print new line of information."""
     with self._lock:
       (filename,position,duration) = self._audiobook.position()
       walltime = strftime("%Y-%m-%d %H:%M:%S")

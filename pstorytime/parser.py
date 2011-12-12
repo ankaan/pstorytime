@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+"""A simple parser interface for an audiobook player."""
+
 #
 # Copyright (C) 2011 Anders Engström <ankan@ankan.eu>
 #
@@ -23,7 +25,18 @@ import gobject
 import os
 from os.path import exists, expanduser
 
+__all__ = [
+  'CmdParser',
+  'parse_pos',
+  ]
+
 class CmdParser(gobject.GObject):
+  """A command parser for an audiobook player.
+  
+  Signals:
+    quit    This signal is emitted when the quit command is parsed and it
+            should cleanly shut down the audiobook player.
+  """
   __gsignals__ = {
     'quit' : (gobject.SIGNAL_RUN_LAST,
               gobject.TYPE_NONE,
@@ -31,6 +44,14 @@ class CmdParser(gobject.GObject):
   }
 
   def __init__(self,audiobook,handler=None,fifopath=None):
+    """Create the parser that optionally reads from a file handler or the given
+    path to a fifo.
+
+    Arguments:
+      audiobook = The audiobook player object to control.
+      handler = An already opened file handler to read from. None to ignore.
+      fifopath = Path to a fifo to read from. None to ignore.
+    """
     gobject.GObject.__init__(self)
     self._audiobook = audiobook
     self._quit = Event()
@@ -41,12 +62,20 @@ class CmdParser(gobject.GObject):
     self._thread.start()
 
   def quit(self):
+    """Shut down the parser."""
     self._quit.set()
 
   def _reader(self,handler=None,fifopath=None):
+    """Start reading data from given file/handler.
+
+    Arguments:
+      handler   File handler to read from.
+      fifopath  Path to a fifo to read from.
+    """
     if handler!=None:
       self._poller(handler)
     elif fifopath!=None:
+      # Create fifo if it does not exist.
       fifopath = expanduser(fifopath)
       if not exists(fifopath):
         os.mkfifo(fifopath,0700)
@@ -54,6 +83,11 @@ class CmdParser(gobject.GObject):
         self._poller(f)
 
   def _poller(self,handler):
+    """Poll the given file handler for commands.
+
+    Arguments:
+      handler   The file handler to poll.
+    """
     while not self._quit.is_set():
       try:
         line = handler.readline()
@@ -63,6 +97,11 @@ class CmdParser(gobject.GObject):
 
 
   def do(self,line):
+    """Try to run the given command.
+
+    Arguments:
+      line  A command to run given as a string.
+    """
     ab = self._audiobook
     data = line.split()
     if len(data)>0:
@@ -70,26 +109,26 @@ class CmdParser(gobject.GObject):
         cmd = data[0]
 
         if cmd=="play":
-          start_file = self.get_file(data)
-          start_pos = self.get_pos(data)
+          start_file = self._get_file(data)
+          start_pos = self._get_pos(data)
           ab.play(start_file=start_file,start_pos=start_pos)
 
         if cmd=="pause":
           ab.pause()
 
         if cmd=="seek":
-          start_file = self.get_file(data)
-          start_pos = self.get_pos(data)
+          start_file = self._get_file(data)
+          start_pos = self._get_pos(data)
           ab.seek(start_file=start_file,start_pos=start_pos)
 
         if cmd=="dseek" and len(data)==2:
-          delta = self.get_pos(data)
+          delta = self._get_pos(data)
           if delta != None:
             ab.dseek(delta)
 
         if cmd=="stepfile" and len(data)==2:
           delta = int(data[1])
-          new_file = ab.get_file(delta)
+          new_file = ab._get_file(delta)
           if new_file!=None:
             ab.seek(start_file=new_file,start_pos=0)
 
@@ -113,13 +152,30 @@ class CmdParser(gobject.GObject):
       except ValueError as e:
         pass
 
-  def get_file(self,data):
+  def _get_file(self,data):
+    """Parse a filename from given data.
+    
+    Arguments:
+      data    List of strings representing each word.
+
+    Returns:  Filename, or None if no filename was given.
+    """
     if len(data)>=3:
       return " ".join(data[1:-1])
     else:
       return None
 
-  def get_pos(self,data):
+  def _get_pos(self,data):
+    """Parse position.
+    
+    Arguments:
+      data    List of strings representing each word.
+
+    Returns:  Position, None if no position was given.
+
+    Exceptions:
+      ValueError if parsing failed.
+    """
     if len(data)>=2:
       pos = parse_pos(data[-1])
       if pos == None:
@@ -129,6 +185,14 @@ class CmdParser(gobject.GObject):
       return None
 
 def parse_pos(raw):
+  """Parse position from given string.
+  
+  Arguments:
+    raw     raw data that is parsed to a position.
+
+  Returns:  Position of file in nanoseconds, or None
+            if parsing failed.
+  """
   # Take care of negative positions
   if raw[0] == "-":
     sign = -1

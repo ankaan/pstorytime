@@ -1,4 +1,12 @@
 # -*- coding: utf-8 -*-
+"""Audiobook playing API.
+
+This module contains a frontend for gstreamer that makes it easy to play and
+control audiobook playing. This differs from playing music in that the position
+where you last stopped listening is very important.
+
+The module also contains user interfaces that uses this API.
+"""
 #
 # Copyright (C) 2011 Anders Engström <ankan@ankan.eu>
 #
@@ -18,10 +26,10 @@
 # along with pstorytime.  If not, see <http://www.gnu.org/licenses/>.
 
 __version__ = "0.1"
-__author__ = "Anders Engström <ankan@ankan.eu>"
+__author__ = "Anders Engstrom <ankan@ankan.eu>"
 __all__ = [
-    'AudioBook',
-    'Config',
-    ]
+  'AudioBook',
+  'Config',
+  ]
 
 from pstorytime.audiobook import AudioBook, Config
