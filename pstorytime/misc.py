@@ -19,7 +19,9 @@
 # You should have received a copy of the GNU General Public License
 # along with pstorytime.  If not, see <http://www.gnu.org/licenses/>.
 
-from os.path import abspath, expanduser, join
+from os.path import abspath, expanduser, join, dirname, isdir, isfile
+import os
+import fcntl
 
 __all__ = [
   'PathGen',
@@ -47,10 +49,10 @@ class PathGen(object):
       default   The default file to use if custom is None.
     """
     if custom == None:
-      filename = default
+      filepath = default
     else:
-      filename = custom
-    filepath = abspath(expanduser(join(self._directory, filename)))
+      filepath = custom
+    filepath = abspath(expanduser(join(self._directory, filepath)))
     filepath = abspath(expanduser(join(self._prefix, filepath[1:])))
     return filepath
 
@@ -64,3 +66,67 @@ def withdoc(origdeco):
     newfun.__module__ = oldfun.__module__
     return newfun
   return newdeco
+
+class LockedException(Exception):
+  pass
+
+class FileLock(object):
+  """File lock handler.
+  """
+  def __init__(self,filepath):
+    """Create a lock for the given file.
+
+    Argements:
+      filepath    The file to lock.
+    """
+    self._filepath = filepath
+    self._acquired = False
+    self._handler = None
+
+  def acquire(self):
+    """Acquire the lock. (Non-blocking.)
+
+    Exceptions:
+      LockedException   Is raised when it is not possible to acquire the lock.
+    """
+    if self._acquired:
+      return True
+    else:
+      try:
+        dirpath = dirname(self._filepath)
+        if not isdir(dirpath) and dirpath!='':
+          os.makedirs(dirpath,mode=0700)
+        self._handler = open(expanduser(self._filepath),'w')
+      except IOError:
+        raise LockedException()
+
+      try:
+        fcntl.lockf(self._handler, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self._acquired = True
+      except IOError:
+        self._handler.close()
+        raise LockedException()
+
+  def release(self):
+    """Release the lock.
+    """
+    if self._acquired:
+      fcntl.lockf(self._handler, fcntl.LOCK_UN)
+      self._handler.close()
+      if isfile(self._filepath):
+        os.remove(self._filepath)
+      self._acquired = False
+
+  def __enter__(self):
+    """Acquire the lock. (Non-blocking.)
+
+    Exceptions:
+      LockedException   Is raised when it is not possible to acquire the lock.
+    """
+    self.acquire()
+
+  def __exit__(self, exc_type, exc_value, traceback):
+    """Release the lock.
+    """
+    self.release()
+    return False

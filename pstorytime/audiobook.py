@@ -39,16 +39,9 @@ class Config(object):
   """Configuration for the audiobook player.
 
   Configuration variables:
-    playlog_file        Relative path to audiobook directory, or absolute path.
-                        Default: None (Becomes: ".playlogfile")
-
-    autolog_file        Relative path to audiobook directory, or absolute path.
-                        Default: None (Becomes playlogfile + ".auto")
-
-    log_prefix          The first / in the absolute path of playlog_file and
-                        autolog_file is exchanged with the contents of this
-                        variable.
-                        Default: ~/.pstorytime/logs
+    playlog_file        Path to play log. Non-absolute paths are relative to
+                        the current working directory.
+                        Default: .playlog
 
     core_extensions     Set of extensions recomended by the audiobook player.
                         Change extra_extensions instead if you are not really
@@ -73,9 +66,7 @@ class Config(object):
   """
   
   def __init__(self):
-    self.playlog_file = None
-    self.autolog_file = None
-    self.log_prefix = "~/.pstorytime/logs"
+    self.playlog_file = ".playlog"
     self.core_extensions = ["m4b"]
     self.extra_extensions = []
     self.autolog_interval = 60
@@ -166,9 +157,7 @@ class AudioBook(gobject.GObject):
       self._log = Log(self,
                       self._player,
                       self._directory,
-                      self._conf.log_prefix,
                       self._conf.playlog_file,
-                      self._conf.autolog_file,
                       self._conf.autolog_interval)
       self._log.connect("notify::playlog",self._on_playlog)
 

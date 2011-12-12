@@ -31,6 +31,7 @@ from threading import RLock
 from pstorytime import *
 from pstorytime.parser import *
 from pstorytime.poswriter import *
+from pstorytime.misc import PathGen, FileLock, LockedException
 
 class TestUI(object):
   """A simple test user interface for the audiobook API. """
@@ -110,9 +111,24 @@ if __name__ == '__main__':
     print("Usage: {0} <audiobookdir>".format(sys.argv[0]))
     sys.exit(1)
   directory = sys.argv[1]
-  
+
   conf = Config()
   conf.backtrack = 10
 
-  ui = TestUI(conf,"~/.pstorytime/cmdpipe",directory)
-  ui.run()
+  pathgen = PathGen(directory,"~/.pstorytime/logs")
+  conf.playlog_file = pathgen.gen(None,".playlog")
+
+  cmdpipe = "~/.pstorytime/cmdpipe"
+  
+  pipelock = FileLock(cmdpipe+".lock")
+  dirlock = FileLock(conf.playlog_file+".lock")
+
+  try:
+    with pipelock:
+      with dirlock:
+        ui = TestUI(conf,cmdpipe,directory)
+        ui.run()
+  except LockedException:
+    print "Error: Another instance is already using the same files."
+    sys.exit(1)
+

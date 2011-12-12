@@ -31,7 +31,6 @@ import time
 import gobject
 
 from pstorytime.repeatingtimer import RepeatingTimer
-from pstorytime.misc import PathGen
 from pstorytime.misc import withdoc
 
 class LogEntry(gobject.GObject):
@@ -99,7 +98,7 @@ class Log(gobject.GObject):
     with self._lock:
       return self._playlog
 
-  def __init__(self,bus,player,directory,log_prefix,playlog_file,autolog_file,autolog_interval):
+  def __init__(self,bus,player,directory,playlog_file,autolog_interval):
     """Create a new log handler.
 
     Arguments:
@@ -109,12 +108,7 @@ class Log(gobject.GObject):
 
       directory         Directory of the audiobook.
 
-      log_prefix        What path to replace the first / with in the path to
-                        the playlog and autolog.
-
       playlog_file      What playlog file to use.
-
-      autolog_file      What autolog file to use.
 
       autolog_interval  How often to autosave position.
     """
@@ -125,13 +119,8 @@ class Log(gobject.GObject):
     self._bus = bus
     self._player = player
 
-    # Find out what files to log data to.
-    pathgen = PathGen(directory,log_prefix)
-    self._playlog_file = pathgen.gen(playlog_file,".playlogfile")
-    if autolog_file == None:
-      self._autolog_file = self._playlog_file+".auto"
-    else:
-      self._autolog_file = pathgen.gen(autolog_file,".autologfile")
+    self._playlog_file = playlog_file
+    self._autolog_file = playlog_file+".auto"
 
     self._playlog = self._load(self._playlog_file)
     self._pending = ""
@@ -272,7 +261,7 @@ def _write_file(filepath,writemode,data):
     data        The data to write.
   """
   dirpath = dirname(filepath)
-  if not isdir(dirpath):
+  if not isdir(dirpath) and dirpath!='':
     os.makedirs(dirpath,mode=0700)
   with open(filepath,writemode) as f:
     f.write(data)
