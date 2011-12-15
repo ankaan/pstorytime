@@ -30,30 +30,24 @@ __all__ = [
 
 class PathGen(object):
   """Generate filepaths from given components. """
-  def __init__(self,directory,prefix):
-    """Create a filepath generater with given directory and prefix.
+  def __init__(self,confdir,abdir):
+    """Create a filepath generater using the given replacements.
 
     Arguments:
-      directory   Directory to place files in.
-      prefix      After generating a filepath, replace the first /
-                  with this prefix.
+    replace     Dictionary with keys that should be replaced with values.
     """
-    self._directory = directory
-    self._prefix = prefix
+    self._replace = {
+      "conf" : abspath(expanduser(confdir)),
+      "audiobook" : abspath(expanduser(abdir)) }
 
-  def gen(self,custom,default):
+  def gen(self,filepath):
     """Generate a filepath for the given file.
     
     Arguments:
-      custom    The custom file to use, or None to use the default.
-      default   The default file to use if custom is None.
+      filepath    The file to use.
     """
-    if custom == None:
-      filepath = default
-    else:
-      filepath = custom
-    filepath = abspath(expanduser(join(self._directory, filepath)))
-    filepath = abspath(expanduser(join(self._prefix, filepath[1:])))
+    if filepath!=None:
+      filepath = filepath.format(**self._replace)
     return filepath
 
 def withdoc(origdeco):
@@ -89,14 +83,13 @@ class FileLock(object):
     Exceptions:
       LockedException   Is raised when it is not possible to acquire the lock.
     """
-    if self._acquired:
-      return True
-    else:
+    if not self._acquired:
+      self._filepath = expanduser(self._filepath)
       try:
         dirpath = dirname(self._filepath)
         if not isdir(dirpath) and dirpath!='':
           os.makedirs(dirpath,mode=0700)
-        self._handler = open(expanduser(self._filepath),'w')
+        self._handler = open(self._filepath,'w')
       except IOError:
         raise LockedException()
 
@@ -129,4 +122,31 @@ class FileLock(object):
     """Release the lock.
     """
     self.release()
+    return False
+
+class DummyLock(object):
+  """A dummy lock.
+  """
+  def __init__(self):
+    """Create a dummy lock.
+    """
+
+  def acquire(self):
+    """Acquire the lock.
+    """
+    pass
+
+  def release(self):
+    """Release the lock.
+    """
+    pass
+
+  def __enter__(self):
+    """Acquire the lock.
+    """
+    pass
+
+  def __exit__(self, exc_type, exc_value, traceback):
+    """Release the lock.
+    """
     return False

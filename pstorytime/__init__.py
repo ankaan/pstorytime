@@ -29,7 +29,6 @@ __version__ = "0.1"
 __author__ = "Anders Engstrom <ankan@ankan.eu>"
 __all__ = [
   'AudioBook',
-  'Config',
   ]
 
-from pstorytime.audiobook import AudioBook, Config
+from pstorytime.audiobook import AudioBook

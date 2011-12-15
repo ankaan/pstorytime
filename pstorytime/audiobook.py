@@ -35,43 +35,6 @@ from pstorytime.log import Log
 import pstorytime.player
 from pstorytime.misc import withdoc
 
-class Config(object):
-  """Configuration for the audiobook player.
-
-  Configuration variables:
-    playlog_file        Path to play log. Non-absolute paths are relative to
-                        the current working directory.
-                        Default: .playlog
-
-    core_extensions     Set of extensions recomended by the audiobook player.
-                        Change extra_extensions instead if you are not really
-                        sure what you are doing. In addition to looking at this
-                        variable and extra_extensions, the extensions
-                        associated with audio files in the system mime type
-                        database are used.
-                        Default: ["m4b"] (Basically same as "m4a")
-
-    extra_extensions    Set of additional extensions to treat as audiobook
-                        files.
-                        Default: []
-
-    autolog_interval    How often the position should be autosaved so that
-                        the position can be recovered upon crashes, including
-                        loss of power etc. (In seconds.)
-                        Default: 60
-
-    backtrack           How far to automatically backtrack after pausing. (In
-                        seconds.)
-                        Default: None (Same as 0)
-  """
-  
-  def __init__(self):
-    self.playlog_file = ".playlog"
-    self.core_extensions = ["m4b"]
-    self.extra_extensions = []
-    self.autolog_interval = 60
-    self.backtrack = None
-
 class AudioBook(gobject.GObject):
   """Audiobook-playing abstraction for gstreamer.
 
@@ -109,6 +72,9 @@ class AudioBook(gobject.GObject):
                   tuple())
   }
 
+  core_extensions = ["m4b"]
+  """Extensions to treat as audio files in addition to those registered as such in the system mime type database."""
+
   @withdoc(gobject.property)
   def playing(self):
     """True if the audiobook is playing. """
@@ -138,7 +104,8 @@ class AudioBook(gobject.GObject):
     """ Create the audiobook playing abstraction.
     
     Arguments:
-      conf        A configuration object like Config.
+      conf        A configuration object like that from the result of the
+                  parser in pstorytime.coreparser.
       directory   Directory of the audiobook to play.
     """
 
@@ -157,8 +124,7 @@ class AudioBook(gobject.GObject):
       self._log = Log(self,
                       self._player,
                       self._directory,
-                      self._conf.playlog_file,
-                      self._conf.autolog_interval)
+                      self._conf)
       self._log.connect("notify::playlog",self._on_playlog)
 
       self._filename = None
@@ -207,6 +173,7 @@ class AudioBook(gobject.GObject):
           self.notify("eob")
           self._playing = False
           self.notify("playing")
+          self.emit("position")
           self._log.stop(custom="eob")
 
   def _play(self, start_file=None, start_pos=None, pos_relative_end=False, log=False, seek=False):
@@ -336,7 +303,8 @@ class AudioBook(gobject.GObject):
                   given.) (Optional, defaults to None.)
     """
     with self._lock:
-      return self._play(start_file, start_pos, log=True, seek=True)
+      if start_file!=None or start_pos!=None:
+        return self._play(start_file, start_pos, log=True, seek=True)
 
   def dseek(self, delta):
     """Seek relative to the current position.
@@ -401,7 +369,7 @@ class AudioBook(gobject.GObject):
         return False
 
       # Check if the filename ends with any of the given extensions.
-      exts = self._conf.core_extensions + self._conf.extra_extensions
+      exts = AudioBook.core_extensions + self._conf.extensions
       exts = tuple(map(lambda e: '.'+e, exts))
       if filename.endswith(exts):
         return True

@@ -21,10 +21,16 @@
 
 import pygst
 pygst.require("0.10")
-import gst
 import os.path
 import threading
 import gobject
+import sys
+
+# Don't touch my arguments!
+argv = sys.argv
+sys.argv = []
+import gst
+sys.argv = argv
 
 from pstorytime.misc import withdoc
 

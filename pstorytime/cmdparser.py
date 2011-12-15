@@ -38,6 +38,9 @@ class CmdParser(gobject.GObject):
             should cleanly shut down the audiobook player.
   """
   __gsignals__ = {
+    'error' : ( gobject.SIGNAL_RUN_LAST,
+                gobject.TYPE_NONE,
+                (gobject.TYPE_STRING,)),
     'quit' : (gobject.SIGNAL_RUN_LAST,
               gobject.TYPE_NONE,
               tuple())
@@ -74,7 +77,7 @@ class CmdParser(gobject.GObject):
     """
     if handler!=None:
       self._poller(handler)
-    elif fifopath!=None:
+    elif fifopath!=None and len(fifopath)>0:
       # Create fifo if it does not exist.
       fifopath = expanduser(fifopath)
       if not exists(fifopath):
@@ -112,33 +115,40 @@ class CmdParser(gobject.GObject):
           start_file = self._get_file(data)
           start_pos = self._get_pos(data)
           ab.play(start_file=start_file,start_pos=start_pos)
+          return True
 
         if cmd=="pause":
           ab.pause()
+          return True
 
         if cmd=="seek":
           start_file = self._get_file(data)
           start_pos = self._get_pos(data)
           ab.seek(start_file=start_file,start_pos=start_pos)
+          return True
 
         if cmd=="dseek" and len(data)==2:
           delta = self._get_pos(data)
           if delta != None:
             ab.dseek(delta)
+          return True
 
         if cmd=="stepfile" and len(data)==2:
           delta = int(data[1])
           new_file = ab._get_file(delta)
           if new_file!=None:
             ab.seek(start_file=new_file,start_pos=0)
+          return True
 
         if cmd=="play_pause" and len(data)==1:
           ab.play_pause()
+          return True
 
         if cmd=="volume" and len(data)==2:
           volume = float(data[1])
           gst = self._audiobook.gst()
           gst.set_property("volume",volume)
+          return True
 
         if cmd=="dvolume" and len(data)==2:
           delta = float(data[1])
@@ -146,11 +156,15 @@ class CmdParser(gobject.GObject):
           volume = gst.get_property("volume")
           volume = max(0, min(volume+delta, 10))
           gst.set_property("volume",volume)
+          return True
 
         if cmd=="quit" and len(data)==1:
           self.emit("quit")
+          return True
       except ValueError as e:
         pass
+    self.emit('error','Failed to parse: "{0}"'.format(line.strip()))
+    return False
 
   def _get_file(self,data):
     """Parse a filename from given data.

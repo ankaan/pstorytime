@@ -29,7 +29,7 @@ import sys
 from threading import RLock
 
 from pstorytime import *
-from pstorytime.parser import *
+from pstorytime.cmdparser import *
 from pstorytime.poswriter import *
 from pstorytime.misc import PathGen, FileLock, LockedException
 

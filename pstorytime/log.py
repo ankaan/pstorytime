@@ -98,7 +98,7 @@ class Log(gobject.GObject):
     with self._lock:
       return self._playlog
 
-  def __init__(self,bus,player,directory,playlog_file,autolog_interval):
+  def __init__(self,bus,player,directory,conf):
     """Create a new log handler.
 
     Arguments:
@@ -108,9 +108,8 @@ class Log(gobject.GObject):
 
       directory         Directory of the audiobook.
 
-      playlog_file      What playlog file to use.
-
-      autolog_interval  How often to autosave position.
+      conf        A configuration object like that from the result of the
+                  parser in pstorytime.coreparser.
     """
 
     gobject.GObject.__gobject_init__(self)
@@ -119,13 +118,13 @@ class Log(gobject.GObject):
     self._bus = bus
     self._player = player
 
-    self._playlog_file = playlog_file
-    self._autolog_file = playlog_file+".auto"
+    self._playlog_file = conf.playlog_file
+    self._autolog_file = conf.playlog_file+".auto"
 
     self._playlog = self._load(self._playlog_file)
     self._pending = ""
 
-    self._autologtimer = RepeatingTimer(autolog_interval, self._autolognow)
+    self._autologtimer = RepeatingTimer(conf.autolog_interval, self._autolognow)
 
     # Merge in old auto save (should only be there if the last session crashed
     # while playing.)
