@@ -25,6 +25,9 @@ import gobject
 import os
 from os.path import exists, expanduser
 
+import select
+import time
+
 __all__ = [
   'CmdParser',
   'parse_pos',
@@ -52,14 +55,13 @@ class CmdParser(gobject.GObject):
 
     Arguments:
       audiobook = The audiobook player object to control.
-      handler = An already opened file handler to read from. None to ignore.
       fifopath = Path to a fifo to read from. None to ignore.
     """
     gobject.GObject.__init__(self)
     self._audiobook = audiobook
     self._quit = Event()
     self._thread = Thread(target=self._reader,
-                          kwargs={"handler":handler, "fifopath":fifopath},
+                          kwargs={"fifopath":fifopath},
                           name="CmdParser")
     self._thread.setDaemon(True)
     self._thread.start()
@@ -68,36 +70,23 @@ class CmdParser(gobject.GObject):
     """Shut down the parser."""
     self._quit.set()
 
-  def _reader(self,handler=None,fifopath=None):
+  def _reader(self,fifopath=None):
     """Start reading data from given file/handler.
 
     Arguments:
       handler   File handler to read from.
       fifopath  Path to a fifo to read from.
     """
-    if handler!=None:
-      self._poller(handler)
-    elif fifopath!=None and len(fifopath)>0:
+    if fifopath!=None and len(fifopath)>0:
       # Create fifo if it does not exist.
       fifopath = expanduser(fifopath)
       if not exists(fifopath):
         os.mkfifo(fifopath,0700)
-      with open(fifopath,"r") as f:
-        self._poller(f)
 
-  def _poller(self,handler):
-    """Poll the given file handler for commands.
-
-    Arguments:
-      handler   The file handler to poll.
-    """
-    while not self._quit.is_set():
-      try:
-        line = handler.readline()
-      except IOError:
-        break
-      self.do(line)
-
+      while not self._quit.is_set():
+        f = file(fifopath,'r')
+        for line in f:
+          self.do(line)
 
   def do(self,line):
     """Try to run the given command.

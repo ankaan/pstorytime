@@ -25,7 +25,7 @@ import pstorytime.cmdparser
 
 class FromCommaList(argparse.Action):
   def __call__(self, parser, namespace, values, option_string=None):
-    separated = values[0].split(",")
+    separated = values.split(",")
     setattr(namespace, self.dest, separated)
 
 class Position(argparse.Action):
@@ -40,7 +40,7 @@ class Position(argparse.Action):
         setattr(namespace, self.dest, position)
 
 class ArgumentParser(argparse.ArgumentParser):
-  def convert_arg_line_to_args(self, raw):
+  def convert_arg_line_to_args(self, arg_line):
     for arg in arg_line.split():
       if not arg.strip():
         continue

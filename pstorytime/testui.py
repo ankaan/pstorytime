@@ -112,11 +112,16 @@ if __name__ == '__main__':
     sys.exit(1)
   directory = sys.argv[1]
 
+  class Config(object):
+    pass
   conf = Config()
-  conf.backtrack = 10
 
-  pathgen = PathGen(directory,"~/.pstorytime/logs")
-  conf.playlog_file = pathgen.gen(None,".playlog")
+  conf.backtrack = None
+  conf.extensions = []
+  conf.autolog_interval = 60
+
+  pathgen = PathGen("~/.pstorytime",directory)
+  conf.playlog_file = pathgen.gen(".playlog")
 
   cmdpipe = "~/.pstorytime/cmdpipe"
   
