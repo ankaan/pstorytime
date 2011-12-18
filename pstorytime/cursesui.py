@@ -138,24 +138,28 @@ class Input(object):
     with self._lock:
       with self._curseslock:
         self._geom = geom
-        self._window.mvwin(geom.y,geom.x)
-        self._window.resize(geom.h,geom.w)
-        self._update()
+        if self._geom.is_sane():
+          self._window.resize(geom.h,geom.w)
+          self._window.mvwin(geom.y,geom.x)
+          self._update()
 
   def _update(self):
     with self._lock:
-      with self._curseslock:
-        self._window.erase()
-        prefix = "> "
-        if self._key!=None:
-          keystr = " ({0})".format(self._key)
-        else:
-          keystr = ""
-        maxbuf = self._geom.w - len(keystr) - len(prefix) - 1
-        bufstr = self._buffer[-maxbuf:]
-        spacing = " "*(maxbuf-len(bufstr))
-        self._window.addstr(0,0,prefix+bufstr+spacing+keystr)
-        self._window.refresh()
+      if self._geom.is_sane():
+        with self._curseslock:
+          self._window.erase()
+          prefix = "> "
+          if self._key!=None:
+            keystr = " ({0})".format(self._key)
+          else:
+            keystr = ""
+          maxbuf = self._geom.w - len(keystr) - len(prefix) - 1
+          bufstr = self._buffer[-maxbuf:]
+          spacing = " "*(maxbuf-len(bufstr))
+          line = prefix+bufstr+spacing+keystr
+          if self._geom.h>=1:
+            self._window.addnstr(0,0,line,self._geom.w-1)
+          self._window.refresh()
 
 class Volume(object):
   HEIGHT = 2
@@ -178,9 +182,10 @@ class Volume(object):
     with self._lock:
       with self._curseslock:
         self._geom = geom
-        self._window.mvwin(geom.y,geom.x)
-        self._window.resize(geom.h,geom.w)
-        self._update()
+        if self._geom.is_sane():
+          self._window.resize(geom.h,geom.w)
+          self._window.mvwin(geom.y,geom.x)
+          self._update()
 
   def _on_volume(self,obj,prop):
     with self._lock:
@@ -188,14 +193,18 @@ class Volume(object):
 
   def _update(self):
     with self._lock:
-      try:
-        vol = "{0:.0%}".format(self._gst.get_property("volume"))
-      except gst.QueryError:
-        vol = "--%"
-      with self._curseslock:
-        self._window.erase()
-        self._window.addstr(0,0,"  Vol\n{0:>5}".format(vol))
-        self._window.refresh()
+      if self._geom.is_sane():
+        try:
+          vol = "{0:.0%}".format(self._gst.get_property("volume"))
+        except gst.QueryError:
+          vol = "--%"
+        with self._curseslock:
+          self._window.erase()
+          if self._geom.h>=1:
+            self._window.addnstr(0,0,"  Vol",self._geom.w-1)
+          if self._geom.h>=2:
+            self._window.addnstr(1,0,"{0:>5}".format(vol),self._geom.w-1)
+          self._window.refresh()
 
 class Status(object):
   HEIGHT = 2
@@ -229,9 +238,10 @@ class Status(object):
     with self._lock:
       with self._curseslock:
         self._geom = geom
-        self._window.mvwin(geom.y,geom.x)
-        self._window.resize(geom.h,geom.w)
-        self._update()
+        if self._geom.is_sane():
+          self._window.resize(geom.h,geom.w)
+          self._window.mvwin(geom.y,geom.x)
+          self._update()
 
   def _on_playing(self,ab,prop):
     """Playing state updated.
@@ -262,31 +272,38 @@ class Status(object):
 
   def _update(self):
     with self._lock:
-      (filename,position,duration) = self._audiobook.position()
+      if self._geom.is_sane():
+        (filename,position,duration) = self._audiobook.position()
 
-      position = timedelta(microseconds=position/1000)
-      position = position - timedelta(microseconds=position.microseconds)
+        position = timedelta(microseconds=position/1000)
+        position = position - timedelta(microseconds=position.microseconds)
 
-      duration = timedelta(microseconds=duration/1000)
-      duration = duration - timedelta(microseconds=duration.microseconds)
+        duration = timedelta(microseconds=duration/1000)
+        duration = duration - timedelta(microseconds=duration.microseconds)
 
-      if self._audiobook.playing:
-        state = "Playing"
-      elif self._audiobook.eob:
-        state = "End"
-      else:
-        state = "Paused"
+        if self._audiobook.playing:
+          state = "Playing"
+        elif self._audiobook.eob:
+          state = "End"
+        else:
+          state = "Paused"
 
-      with self._curseslock:
-        self._window.erase()
-        self._window.addstr(0,0,
-          "File: {filename}\n{position} / {duration} [{state}]".format(
-            filename=filename,
+        with self._curseslock:
+          prefix = "File: "
+          maxchars = self._geom.w - len(prefix) - 1
+          first = prefix + filename[-maxchars:]
+
+          second = "{position} / {duration} [{state}]".format(
             position=position,
             duration=duration,
             state=state)
-          )
-        self._window.refresh()
+
+          self._window.erase()
+          if self._geom.h>=1:
+            self._window.addnstr(0,0,first,self._geom.w-1)
+          if self._geom.h>=2:
+            self._window.addnstr(1,0,second,self._geom.w-1)
+          self._window.refresh()
 
 class Geometry(object):
   @staticmethod
@@ -302,6 +319,9 @@ class Geometry(object):
     self.w = w
     self.y = y
     self.x = x
+
+  def is_sane(self):
+    return self.h>0 and self.w>0 and self.y>=0 and self.x>=0
 
   def newwin(self,parent=None):
     if parent==None:
@@ -362,20 +382,23 @@ class CursesUI(object):
                   "-":"buffer store -",
                   "=":"buffer clear",
                   "KEY_BACKSPACE":"buffer erase"}
+
+      (volume_geom, status_geom, input_geom) = self._compute_geom()
+
       self._input = Input(curseslock=self._curseslock,
-                          geom=self._input_geom(),
+                          geom=input_geom,
                           charmap=charmap,
                           parser=self._parser)
 
       with self._curseslock:
         self._volume = Volume(curseslock=self._curseslock,
                               audiobook=self._audiobook,
-                              geom=self._volume_geom())
+                              geom=volume_geom)
 
         self._status = Status(curseslock=self._curseslock,
                               conf=conf,
                               audiobook=self._audiobook,
-                              geom=self._status_geom(),
+                              geom=status_geom,
                               interval=1)
 
       self._gobject_thread = Thread(target=self._mainloop.run,
@@ -386,29 +409,28 @@ class CursesUI(object):
     with self._lock:
       return Geometry.fromWindow(self._window)
 
-  def _input_geom(self):
+  def _compute_geom(self):
     with self._lock:
       topgeom = self.getGeom()
-      return Geometry(h=Input.HEIGHT,
-                      w=topgeom.w,
-                      y=topgeom.h-Status.HEIGHT-Input.HEIGHT,
-                      x=0)
+      volume_geom = Geometry( h=min(Volume.HEIGHT,topgeom.h),
+                              w=min(Volume.WIDTH,topgeom.w),
+                              y=max(0,topgeom.h-Volume.HEIGHT),
+                              x=max(0,topgeom.w-Volume.WIDTH))
 
-  def _volume_geom(self):
-    with self._lock:
-      topgeom = self.getGeom()
-      return Geometry(h=Volume.HEIGHT,
-                      w=Volume.WIDTH,
-                      y=topgeom.h-Volume.HEIGHT,
-                      x=topgeom.w-Volume.WIDTH)
+      status_geom = Geometry( h=min(Status.HEIGHT,topgeom.h),
+                              w=topgeom.w-volume_geom.w,
+                              y=max(0,topgeom.h-Status.HEIGHT),
+                              x=0)
 
-  def _status_geom(self):
-    with self._lock:
-      topgeom = self.getGeom()
-      return Geometry(h=Status.HEIGHT,
-                      w=topgeom.w-Volume.WIDTH,
-                      y=topgeom.h-Status.HEIGHT,
-                      x=0)
+      statusvol_h = max(Volume.HEIGHT,Status.HEIGHT)
+
+      input_geom = Geometry(  h=min(Input.HEIGHT,topgeom.h-statusvol_h),
+                              w=topgeom.w,
+                              y=max(0,topgeom.h-statusvol_h-Input.HEIGHT),
+                              x=0)
+
+      return (volume_geom,status_geom,input_geom)
+      
 
   def _on_resize(self,event):
     with self._lock:
@@ -417,9 +439,10 @@ class CursesUI(object):
   def _update_layout(self):
     with self._lock:
       with self._curseslock:
-        self._input.setGeom(self._input_geom())
-        self._volume.setGeom(self._volume_geom())
-        self._status.setGeom(self._status_geom())
+        (volume_geom,status_geom,input_geom) = self._compute_geom()
+        self._input.setGeom(input_geom)
+        self._volume.setGeom(volume_geom)
+        self._status.setGeom(status_geom)
 
   def _on_quit(self,obj):
     """The user asked to shut down the player.
