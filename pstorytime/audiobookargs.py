@@ -59,7 +59,7 @@ audiobookargs.add_argument(
 audiobookargs.add_argument(
   "--extensions",
   help="Comma separated list of additional extensions to treat as audiobook files.",
-  default=[],
+  default="",
   action=FromCommaList)
 
 audiobookargs.add_argument(
