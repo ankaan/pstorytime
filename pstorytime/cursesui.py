@@ -62,7 +62,6 @@ class Input(object):
 
     self._charmap = charmap
     self._parser = parser
-    self._eventmap = {}
 
     self._key = None
 
@@ -108,12 +107,8 @@ class Input(object):
                   self._buffer = self._buffer[:-1]
                 elif eventword[1] == "clear":
                   self._buffer = ""
-
-              handlers = self._eventmap.get(eventname,[])
-            for fun in handlers:
-              fun(event.format(b=self._buffer))
-            if self._parser!=None and len(handlers)==0 and eventname!="buffer":
-              self._parser.do(event)
+            if self._parser!=None and eventname!="buffer":
+              self._parser.do(event.format(b=self._buffer))
           except (KeyError, IndexError):
             pass
 
@@ -134,22 +129,6 @@ class Input(object):
       if not self._quit.is_set():
         self._quit.set()
         os.kill(os.getpid(), signal.SIGUSR1)
-
-  def register(self,eventname,handler):
-    with self._lock:
-      handlers = self._eventmap.get(eventname,[])
-      handlers.append(handler)
-      self._eventmap[eventname] = handlers
-
-  def unregister(self,eventname,handler):
-    with self._lock:
-      if eventname in self._eventmap:
-        try:
-          self._eventmap[eventname].remove(handler)
-        except IndexError:
-          pass
-        if len(self._eventmap[eventname])==0:
-          del self._eventmap[eventname]
 
   def getGeom(self):
     with self._lock:
@@ -352,13 +331,22 @@ class CursesUI(object):
 
       self._parser = CmdParser(self._audiobook,fifopath=conf.cmdpipe)
       self._parser.connect("quit",self._on_quit)
+      self._parser.register("resize",self._on_resize)
 
       gobject.threads_init()
       self._mainloop = glib.MainLoop()
 
       charmap = { "KEY_RESIZE":"resize",
                   "^L":"resize",
-                  "q":quit,
+                  "q":"quit",
+                  " ":"play_pause",
+                  "KEY_LEFT":"seek -10",
+                  "h":"seek -10",
+                  "KEY_RIGHT":"seek +10",
+                  "l":"seek +10",
+                  "u":"volume +0.1",
+                  "d":"volume -0.1",
+                  "^J":"seek {b}",
                   "1":"buffer store 1",
                   "2":"buffer store 2",
                   "3":"buffer store 3",
@@ -372,14 +360,12 @@ class CursesUI(object):
                   ":":"buffer store :",
                   "+":"buffer store +",
                   "-":"buffer store -",
-                  "KEY_BACKSPACE":"buffer erase",
-                  "^J":"enter {b}"}
+                  "=":"buffer clear",
+                  "KEY_BACKSPACE":"buffer erase"}
       self._input = Input(curseslock=self._curseslock,
                           geom=self._input_geom(),
                           charmap=charmap,
                           parser=self._parser)
-
-      self._input.register("resize",self._on_resize)
 
       with self._curseslock:
         self._volume = Volume(curseslock=self._curseslock,
@@ -465,6 +451,8 @@ class CursesUI(object):
                 decide.)
     """
     try:
+      self._audiobook.gst().set_property("volume",self._conf.volume)
+
       if(self._conf.autoplay):
         self._audiobook.play(filename,position)
       else:
@@ -521,6 +509,12 @@ def run():
     help="Start playing when the audiobook is started.",
     dest='autoplay',
     type=bool)
+
+  parser.add_argument(
+    "--volume",
+    help="Playback volume as a float between 0 and 10.",
+    default=1.0,
+    type=float)
 
   conf = parser.parse_args()
 

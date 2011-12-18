@@ -19,7 +19,7 @@
 # You should have received a copy of the GNU General Public License
 # along with pstorytime.  If not, see <http://www.gnu.org/licenses/>.
 
-from threading import Thread, Event
+from threading import Thread, Event, RLock
 from gst import SECOND
 import gobject
 import os
@@ -58,6 +58,7 @@ class CmdParser(gobject.GObject):
       fifopath = Path to a fifo to read from. None to ignore.
     """
     gobject.GObject.__init__(self)
+    self._lock = RLock()
     self._audiobook = audiobook
     self._quit = Event()
     self._thread = Thread(target=self._reader,
@@ -65,6 +66,23 @@ class CmdParser(gobject.GObject):
                           name="CmdParser")
     self._thread.setDaemon(True)
     self._thread.start()
+    self._eventmap = {}
+
+  def register(self,eventname,handler):
+    with self._lock:
+      handlers = self._eventmap.get(eventname,[])
+      handlers.append(handler)
+      self._eventmap[eventname] = handlers
+
+  def unregister(self,eventname,handler):
+    with self._lock:
+      if eventname in self._eventmap:
+        try:
+          self._eventmap[eventname].remove(handler)
+        except IndexError:
+          pass
+        if len(self._eventmap[eventname])==0:
+          del self._eventmap[eventname]
 
   def quit(self):
     """Shut down the parser."""
@@ -94,66 +112,80 @@ class CmdParser(gobject.GObject):
     Arguments:
       line  A command to run given as a string.
     """
-    ab = self._audiobook
-    data = line.split()
-    if len(data)>0:
-      try:
-        cmd = data[0]
+    with self._lock:
+      handlers = []
+      ab = self._audiobook
+      data = line.split()
+      if len(data)>0:
+        try:
+          cmd = data[0]
 
-        if cmd=="play":
-          start_file = self._get_file(data)
-          start_pos = self._get_pos(data)
-          ab.play(start_file=start_file,start_pos=start_pos)
-          return True
+          if cmd=="play":
+            start_file = self._get_file(data)
+            (rel, start_pos) = self._get_pos(data)
+            ab.play(start_file=start_file,start_pos=start_pos)
+            return True
 
-        if cmd=="pause":
-          ab.pause()
-          return True
+          elif cmd=="pause":
+            ab.pause()
+            return True
 
-        if cmd=="seek":
-          start_file = self._get_file(data)
-          start_pos = self._get_pos(data)
-          ab.seek(start_file=start_file,start_pos=start_pos)
-          return True
+          elif cmd=="seek":
+            start_file = self._get_file(data)
+            (rel, start_pos) = self._get_pos(data)
+            if start_file == None and rel:
+              ab.dseek(start_pos)
+            else:
+              ab.seek(start_file=start_file,start_pos=start_pos)
+            return True
 
-        if cmd=="dseek" and len(data)==2:
-          delta = self._get_pos(data)
-          if delta != None:
-            ab.dseek(delta)
-          return True
+          elif cmd=="dseek" and len(data)==2:
+            (rel, start_pos) = self._get_pos(data)
+            if start_pos != None:
+              ab.dseek(start_pos)
+            return True
 
-        if cmd=="stepfile" and len(data)==2:
-          delta = int(data[1])
-          new_file = ab._get_file(delta)
-          if new_file!=None:
-            ab.seek(start_file=new_file,start_pos=0)
-          return True
+          elif cmd=="stepfile" and len(data)==2:
+            delta = int(data[1])
+            new_file = ab._get_file(delta)
+            if new_file!=None:
+              ab.seek(start_file=new_file,start_pos=0)
+            return True
 
-        if cmd=="play_pause" and len(data)==1:
-          ab.play_pause()
-          return True
+          elif cmd=="play_pause" and len(data)==1:
+            ab.play_pause()
+            return True
 
-        if cmd=="volume" and len(data)==2:
-          volume = float(data[1])
-          gst = self._audiobook.gst()
-          gst.set_property("volume",volume)
-          return True
+          elif (cmd=="volume" or cmd=="dvolume") and len(data)==2:
+            raw = data[1]
+            if raw[0] == "+" or raw[0] == "-" or cmd == "dvolume":
+              gst = self._audiobook.gst()
+              oldvol = gst.get_property("volume")
+              volume = oldvol + float(raw)
+            else:
+              volume = float(raw)
 
-        if cmd=="dvolume" and len(data)==2:
-          delta = float(data[1])
-          gst = self._audiobook.gst()
-          volume = gst.get_property("volume")
-          volume = max(0, min(volume+delta, 10))
-          gst.set_property("volume",volume)
-          return True
+            volume = max(0, min(volume, 10))
+            gst.set_property("volume",volume)
+            return True
 
-        if cmd=="quit" and len(data)==1:
-          self.emit("quit")
-          return True
-      except ValueError as e:
-        pass
-    self.emit('error','Failed to parse: "{0}"'.format(line.strip()))
-    return False
+          elif cmd=="quit" and len(data)==1:
+            self.emit("quit")
+            return True
+
+          else:
+            handlers = self._eventmap.get(cmd,[])
+
+        except ValueError as e:
+          pass
+
+    if len(handlers)>0:
+      for fun in handlers:
+        fun(line)
+      return True
+    else:
+      self.emit('error','Failed to parse: "{0}"'.format(line.strip()))
+      return False
 
   def _get_file(self,data):
     """Parse a filename from given data.
@@ -180,12 +212,12 @@ class CmdParser(gobject.GObject):
       ValueError if parsing failed.
     """
     if len(data)>=2:
-      pos = parse_pos(data[-1])
+      (rel, pos) = parse_pos(data[-1])
       if pos == None:
         raise ValueError()
-      return pos
+      return (rel, pos)
     else:
-      return None
+      return (None,None)
 
 def parse_pos(raw):
   """Parse position from given string.
@@ -196,19 +228,23 @@ def parse_pos(raw):
   Returns:  Position of file in nanoseconds, or None
             if parsing failed.
   """
+
   # Take care of negative positions
   if raw[0] == "-":
     sign = -1
     raw = raw[1:]
+    rel = True
   elif raw[0] == "+":
     sign = 1
     raw = raw[1:]
+    rel = True
   else:
     sign = 1
+    rel = False
 
   for c in raw:
     if c not in ":0123456789":
-      return None
+      return (None,None)
 
   parts = raw.split(":")
 
@@ -223,6 +259,7 @@ def parse_pos(raw):
   if len(parts) >= 3:
     hours = int(parts[-3])
   if len(parts) > 3:
-    return None
+    return (None,None)
 
-  return sign * ((hours*60 + minutes)*60 + seconds) * SECOND
+  pos = sign * ((hours*60 + minutes)*60 + seconds) * SECOND
+  return (rel, pos)
