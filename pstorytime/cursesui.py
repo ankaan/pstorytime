@@ -126,6 +126,7 @@ class Input(object):
 
   def quit(self):
     with self._lock:
+      self._clear_timer.destroy()
       if not self._quit.is_set():
         self._quit.set()
         os.kill(os.getpid(), signal.SIGUSR1)
@@ -230,6 +231,9 @@ class Status(object):
       self._timer = RepeatingTimer(interval, self._on_timer)
       self._update()
 
+  def quit(self):
+    self._timer.destroy()
+
   def getGeom(self):
     with self._lock:
       return self._geom
@@ -274,6 +278,8 @@ class Status(object):
     with self._lock:
       if self._geom.is_sane():
         (filename,position,duration) = self._audiobook.position()
+        if filename == None:
+          filename = ""
 
         position = timedelta(microseconds=position/1000)
         position = position - timedelta(microseconds=position.microseconds)
@@ -403,7 +409,6 @@ class CursesUI(object):
 
       self._gobject_thread = Thread(target=self._mainloop.run,
                                     name="GobjectLoop")
-      self._gobject_thread.setDaemon(True)
 
   def getGeom(self):
     with self._lock:
@@ -458,6 +463,7 @@ class CursesUI(object):
     """
     with self._lock:
       self._audiobook.pause()
+      self._status.quit()
       self._mainloop.quit()
       self._parser.quit()
       self._audiobook.quit()

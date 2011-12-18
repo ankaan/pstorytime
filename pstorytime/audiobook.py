@@ -128,6 +128,7 @@ class AudioBook(gobject.GObject):
       self._log.connect("notify::playlog",self._on_playlog)
 
       self._filename = None
+      self._eob = False
 
       # Try to load last entry from play log.
       if len(self._log.playlog)>0:

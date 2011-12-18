@@ -47,7 +47,6 @@ class RepeatingTimer(object):
 
     self._thread = threading.Thread(target=self._run,
                                     name="RepeatingTimerThread")
-    self._thread.setDaemon(True)
     self._thread.start()
 
     self._begin = None
