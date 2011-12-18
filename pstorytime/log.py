@@ -147,42 +147,20 @@ class Log(gobject.GObject):
     """Quit the autologger, destroy everything. """
     self._autologtimer.destroy()
 
-  def start(self, seek=False, autolog=True):
-    """Log entry for starting to play audiobook.
-
-    Arguments:
-      seek      Is this a seek event?
-      autolog   Should autologging be started?
-    """
+  def start(self):
+    """Start autologging (or reset the timer.)"""
     with self._lock:
-      if seek:
-        self._lognow("seekto")
-      else:
-        self._lognow("start")
-      if autolog:
-        self._autologtimer.start()
-        self._autolognow()
+      self._autologtimer.start()
+      self._autolognow()
 
-  def stop(self, seek=False, custom=None):
-    """Log entry for stopping to play audiobook.
-
-    Arguments:
-      seek      Is this a seek event?
-      autolog   A name to use instead of the standard event names.
-    """
+  def stop(self):
+    """Stop autologging and remove autolog file."""
     with self._lock:
-      if custom!=None:
-        self._lognow(custom)
-      elif seek:
-        self._lognow("seekfrom")
-      else:
-        self._lognow("stop")
-      # Stop autologging and remove autolog file.
       self._autologtimer.stop()
       if isfile(self._autolog_file):
         os.remove(self._autolog_file)
 
-  def _lognow(self,event):
+  def lognow(self,event):
     """Log an event with the given event name at the current position and time.
 
     Arguments:

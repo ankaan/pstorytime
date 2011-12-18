@@ -65,9 +65,11 @@ audiobookargs.add_argument(
 audiobookargs.add_argument(
   "--autolog-interval",
   help="How often (in seconds) the position should be autosaved so that the position can be recovered upon crashes, including loss of power etc.",
-  default=60)
+  default=60,
+  type=int)
 
 audiobookargs.add_argument(
   "--backtrack",
   help="How far (in seconds) to automatically backtrack after pausing.",
-  default=10)
+  default=10,
+  type=int)

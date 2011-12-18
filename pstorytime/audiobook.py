@@ -174,7 +174,8 @@ class AudioBook(gobject.GObject):
           self._playing = False
           self.notify("playing")
           self.emit("position")
-          self._log.stop(custom="eob")
+          self._log.lognow("eob")
+          self._log.stop()
 
   def _play(self, start_file=None, start_pos=None, pos_relative_end=False, log=False, seek=False):
     """Internal general play abstraction.
@@ -214,7 +215,8 @@ class AudioBook(gobject.GObject):
         self.notify("filename")
         if not self._player.load(start_file):
           # Failed to load file.
-          self._log.stop(custom="loadfail")
+          self._log.lognow("loadfail")
+          self._log.stop()
           self._playing = False
           self.notify("playing")
           return False
@@ -246,8 +248,13 @@ class AudioBook(gobject.GObject):
             self._play(next_file, start_pos-duration, seek=True)
 
       if log:
-        # Log "destination", don't start autologging if this is a paused seek.
-        self._log.start(seek=seek, autolog=(not paused_seek))
+        if seek:
+          self._log.lognow("seekto")
+        else:
+          self._log.lognow("start")
+
+        if not paused_seek:
+          self._log.start()
 
       if not paused_seek:
         self._playing = True
@@ -270,7 +277,11 @@ class AudioBook(gobject.GObject):
         self.notify("playing")
         self._player.pause()
         if log:
-          self._log.stop(seek=seek)
+          if seek:
+            self._log.lognow("seekfrom")
+          else:
+            self._log.lognow("stop")
+          self._log.stop()
         self.emit("position")
 
   def play(self, start_file=None, start_pos=None):

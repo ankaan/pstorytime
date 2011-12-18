@@ -64,12 +64,17 @@ class Input(object):
     self._parser = parser
     self._eventmap = {}
 
-    self._key = ""
-    self._update()
+    self._key = None
 
     self._quit = Event()
     signal.signal(signal.SIGUSR1, lambda signum, stack_frame: None)
     signal.signal(signal.SIGTERM, lambda signum, stack_frame: exit(0))
+
+    self._clear_timer = RepeatingTimer(1,self._clear_key)
+
+    self._buffer = ""
+
+    self._update()
 
   def run(self):
     try:
@@ -83,27 +88,46 @@ class Input(object):
           break
 
         while True:
-          with self._curseslock:
-            ch = self._window.getch()
-            if ch == -1:
-              break
-            key = curses.keyname(ch)
-            self._key = key
-            self._update()
+          with self._lock:
+            with self._curseslock:
+              ch = self._window.getch()
+              if ch == -1:
+                break
+              key = curses.keyname(ch)
+              self._key = key
 
           try:
             with self._lock:
               event = self._charmap[key]
-              eventname = event.split()[0]
+              eventword = event.split()
+              eventname = eventword[0]
+              if eventname=="buffer":
+                if eventword[1] == "store":
+                  self._buffer += eventword[2]
+                elif eventword[1] == "erase":
+                  self._buffer = self._buffer[:-1]
+                elif eventword[1] == "clear":
+                  self._buffer = ""
+
               handlers = self._eventmap.get(eventname,[])
             for fun in handlers:
-              fun(event)
-            if self._parser!=None and len(handlers)==0:
+              fun(event.format(b=self._buffer))
+            if self._parser!=None and len(handlers)==0 and eventname!="buffer":
               self._parser.do(event)
           except (KeyError, IndexError):
             pass
+
+          self._update()
+          self._clear_timer.start()
     finally:
       self._quit.set()
+
+  def _clear_key(self):
+    with self._lock:
+      if self._clear_timer.started():
+        self._clear_timer.stop()
+        self._key = None
+        self._update()
 
   def quit(self):
     with self._lock:
@@ -143,7 +167,15 @@ class Input(object):
     with self._lock:
       with self._curseslock:
         self._window.erase()
-        self._window.addstr(0,0,"Key: '{0}'".format(self._key))
+        prefix = "> "
+        if self._key!=None:
+          keystr = " ({0})".format(self._key)
+        else:
+          keystr = ""
+        maxbuf = self._geom.w - len(keystr) - len(prefix) - 1
+        bufstr = self._buffer[-maxbuf:]
+        spacing = " "*(maxbuf-len(bufstr))
+        self._window.addstr(0,0,prefix+bufstr+spacing+keystr)
         self._window.refresh()
 
 class Volume(object):
@@ -207,7 +239,7 @@ class Status(object):
       self._audiobook.connect("notify::playing",self._on_playing)
       self._gst = self._audiobook.gst()
       self._window = geom.newwin()
-      self._timer = RepeatingTimer(interval, self._update)
+      self._timer = RepeatingTimer(interval, self._on_timer)
       self._update()
 
   def getGeom(self):
@@ -243,6 +275,11 @@ class Status(object):
     """
     with self._lock:
       self._update()
+
+  def _on_timer(self):
+    with self._lock:
+      if self._timer.started():
+        self._update()
 
   def _update(self):
     with self._lock:
@@ -320,7 +357,23 @@ class CursesUI(object):
       self._mainloop = glib.MainLoop()
 
       charmap = { "KEY_RESIZE":"resize",
-                  "^L":"resize"}
+                  "^L":"resize",
+                  "q":quit,
+                  "1":"buffer store 1",
+                  "2":"buffer store 2",
+                  "3":"buffer store 3",
+                  "4":"buffer store 4",
+                  "5":"buffer store 5",
+                  "6":"buffer store 6",
+                  "7":"buffer store 7",
+                  "8":"buffer store 8",
+                  "9":"buffer store 9",
+                  "0":"buffer store 0",
+                  ":":"buffer store :",
+                  "+":"buffer store +",
+                  "-":"buffer store -",
+                  "KEY_BACKSPACE":"buffer erase",
+                  "^J":"enter {b}"}
       self._input = Input(curseslock=self._curseslock,
                           geom=self._input_geom(),
                           charmap=charmap,
