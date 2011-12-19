@@ -66,6 +66,10 @@ class Select(object):
                               self._geom,
                               self._curseslock,
                               self._audiobook)
+    self._filesel = FileSelect( self._window,
+                                self._geom,
+                                self._curseslock,
+                                self._audiobook)
     self._focus = self._logsel
 
     self._parser.connect("event",self._on_event)
@@ -80,6 +84,7 @@ class Select(object):
       with self._curseslock:
         self._geom = geom
         self._logsel.setGeom(geom)
+        self._filesel.setGeom(geom)
         if self._geom.is_sane():
           self._window.resize(geom.h,geom.w)
           self._window.mvwin(geom.y,geom.x)
@@ -128,7 +133,11 @@ class Select(object):
         self._focus.select(rel,pos)
 
   def _swap_view(self):
-    pass
+    if self._focus == self._logsel:
+      self._focus = self._filesel
+    else:
+      self._focus = self._logsel
+    self._update()
 
   def _update(self):
     with self._lock:
@@ -183,8 +192,7 @@ class LogSelect(object):
     with self._lock:
       playlog = self._audiobook.playlog
       self._focus = calc_focus( length = len(playlog),
-                                focus = focus,
-                                delta = 0)
+                                focus = focus)
       self.draw()
 
   def select(self,rel,bufpos):
@@ -196,7 +204,7 @@ class LogSelect(object):
           ab.dseek(bufpos)
         elif rel!=None:
           ab.seek(None,bufpos)
-      else:
+      elif self._focus <= len(playlog):
         filename = playlog[self._focus].filename
         position = playlog[self._focus].position
         if rel:
@@ -213,6 +221,11 @@ class LogSelect(object):
           self._window.erase()
 
           playlog = self._audiobook.playlog
+
+          # Make sure the focus index is valid.
+          self._focus = calc_focus( length = len(playlog),
+                                    focus = self._focus)
+
           num = min(self._geom.h, len(playlog))
           focus = self._focus
 
@@ -260,7 +273,115 @@ class LogSelect(object):
               self._window.addnstr(i, 0, line, self._geom.w-1,attr)
           self._window.refresh()
 
-def calc_focus(length,focus,delta):
+class FileSelect(object):
+  def __init__(self,window,geom,curseslock,audiobook):
+    self._lock = RLock()
+    self._window = window
+    self._geom = geom
+    self._curseslock = curseslock
+    self._audiobook = audiobook
+
+    self._focus = None
+
+  def getGeom(self):
+    with self._lock:
+      return self._geom
+
+  def setGeom(self,geom):
+    with self._lock:
+      with self._curseslock:
+        self._geom = geom
+
+  def move(self,delta):
+    with self._lock:
+      filelist = self._audiobook.list_files()
+      self._focus = calc_focus( length = len(filelist),
+                                focus = self._focus,
+                                delta = delta)
+      self.draw()
+
+  def ppage(self):
+    with self._lock:
+      filelist = self._audiobook.list_files()
+      num = min(self._geom.h, len(filelist))
+      self._focus = calc_ppage( length = len(filelist),
+                                num = num,
+                                focus = self._focus)
+      self.draw()
+
+  def npage(self):
+    with self._lock:
+      filelist = self._audiobook.list_files()
+      num = min(self._geom.h, len(filelist))
+      self._focus = calc_npage( length = len(filelist),
+                                num = num,
+                                focus = self._focus)
+      self.draw()
+
+  def move_to(self,focus):
+    with self._lock:
+      filelist = self._audiobook.list_files()
+      self._focus = calc_focus( length = len(filelist),
+                                focus = focus)
+      self.draw()
+
+  def select(self,rel,bufpos):
+    with self._lock:
+      ab = self._audiobook
+      filelist = ab.list_files()
+      if self._focus == None:
+        if rel:
+          ab.dseek(bufpos)
+        elif rel!=None:
+          ab.seek(None,bufpos)
+      elif self._focus <= len(filelist):
+        ab.seek(filelist[self._focus],bufpos)
+
+  def draw(self):
+    with self._lock:
+      if self._geom.is_sane():
+        with self._curseslock:
+          self._window.erase()
+
+          filelist = self._audiobook.list_files()
+
+          # Make sure the focus index is valid.
+          self._focus = calc_focus( length = len(filelist),
+                                    focus = self._focus)
+
+          num = min(self._geom.h, len(filelist))
+          focus = self._focus
+
+          if focus==None:
+            start = max(0, len(filelist)-num)
+          else:
+            start = max(0, min(len(filelist)-num, focus - num/2))
+
+          for i in xrange(0, num):
+            # Position in filelist
+            listi = i + start
+            # Check if this is the currently selected line
+            if listi == focus:
+              mark = "-> "
+              attr = curses.A_REVERSE
+            else:
+              mark = "   "
+              attr = curses.A_NORMAL
+
+            # Compute maximum length of filename
+            part0len = max(0, self._geom.w - 1 - len(mark))
+            # Take the end of filename, if it is too long.
+            part0 = filelist[listi][-part0len:]
+
+            # Combine into complete line.
+            pad = " " * (part0len - len(part0))
+            line = mark + part0 + pad
+
+            if self._geom.h>=1:
+              self._window.addnstr(i, 0, line, self._geom.w-1,attr)
+          self._window.refresh()
+
+def calc_focus(length,focus,delta=0):
   if focus == None:
     if delta>0:
       focus = delta-1
