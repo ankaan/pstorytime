@@ -55,6 +55,11 @@ class LogEntry(gobject.GObject):
     """At what position the event occurred. """
     return self._position
 
+  @withdoc(gobject.property)
+  def duration(self):
+    """At what position the event occurred. """
+    return self._duration
+
   @staticmethod
   def parse(line):
     """Parse a line of text into a LogEntry. """
@@ -63,16 +68,17 @@ class LogEntry(gobject.GObject):
       line = line[:-1]
 
     data = line.split(' ')
-    if len(data)>=4:
+    if len(data)>=5:
       walltime = data[0]
       event = data[1]
-      filename = " ".join(data[2:-1])
-      position = data[-1]
-      return LogEntry(walltime, event, filename, position)
+      filename = " ".join(data[2:-2])
+      position = data[-2]
+      duration = data[-1]
+      return LogEntry(walltime, event, filename, position, duration)
     else:
       return None
 
-  def __init__(self,walltime,event,filename,position):
+  def __init__(self,walltime,event,filename,position,duration):
     """Create a new LogEntry.
     
     Arguments:
@@ -80,16 +86,18 @@ class LogEntry(gobject.GObject):
       event     What occurred.
       filename  In what file.
       position  At what position.
+      duration  Duration of the file.
     """
     gobject.GObject.__gobject_init__(self)
     self._walltime = int(walltime)
     self._event = event
     self._filename = filename
     self._position = int(position)
+    self._duration = int(duration)
 
   def __str__(self):
     """Convert the entry back into a string. """
-    return "{e.walltime} {e.event} {e.filename} {e.position}".format(e=self)
+    return "{e.walltime} {e.event} {e.filename} {e.position} {e.duration}".format(e=self)
 
 class Log(gobject.GObject):
   @withdoc(gobject.property)
@@ -159,8 +167,8 @@ class Log(gobject.GObject):
     """
     with self._lock:
       walltime = time.time()
-      (filename,position,_) = self._player.position()
-      self._logentry(LogEntry(walltime,event,filename,position))
+      (filename,position,duration) = self._player.position()
+      self._logentry(LogEntry(walltime,event,filename,position,duration))
 
   def _load(self,logfile):
     """Load log from given file.
@@ -190,8 +198,8 @@ class Log(gobject.GObject):
       if self._autologtimer.started():
         # Update autolog
         walltime = time.time()
-        (filename,position,_) = self._player.position()
-        event = LogEntry(walltime, 'auto', filename, position)
+        (filename,position,duration) = self._player.position()
+        event = LogEntry(walltime, 'auto', filename, position, duration)
         line = str(event)+"\n"
         try:
           _write_file(self._autolog_file,'wb',line)

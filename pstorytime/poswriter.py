@@ -24,6 +24,7 @@ from time import strftime, time
 from datetime import timedelta
 
 from pstorytime.repeatingtimer import RepeatingTimer
+from pstorytime.misc import ns_to_str
 
 __all__ = [
   'PosWriter',
@@ -99,20 +100,13 @@ class PosWriter(object):
     with self._lock:
       (filename,position,duration) = self._audiobook.position()
       walltime = strftime("%Y-%m-%d %H:%M:%S")
-
-      position = timedelta(microseconds=position/1000)
-      position = position - timedelta(microseconds=position.microseconds)
-
-      duration = timedelta(microseconds=duration/1000)
-      duration = duration - timedelta(microseconds=duration.microseconds)
-
       volume = self._gst.get_property("volume")
 
       self._handler.write("{walltime}: {filename} {position}/{duration} (vol: {volume})\n".format(
         walltime = walltime,
         filename = filename,
-        position = str(position),
-        duration = str(duration),
+        position = ns_to_str(position),
+        duration = ns_to_str(duration),
         volume = volume
         ))
       self._handler.flush()

@@ -29,7 +29,6 @@ from os.path import isfile, isdir, join, expanduser, dirname, basename
 import select
 import signal
 import os
-from datetime import timedelta
 
 import pygst
 pygst.require("0.10")
@@ -45,7 +44,7 @@ import time
 
 from pstorytime import *
 from pstorytime.cmdparser import *
-from pstorytime.misc import PathGen, FileLock, DummyLock, LockedException
+from pstorytime.misc import PathGen, FileLock, DummyLock, LockedException, ns_to_str
 from pstorytime.repeatingtimer import RepeatingTimer
 import pstorytime.audiobookargs
 
@@ -73,7 +72,7 @@ class Select(object):
     self._focus = self._logsel
 
     self._parser.connect("event",self._on_event)
-    self._update()
+    self.update()
 
   def getGeom(self):
     with self._lock:
@@ -88,14 +87,14 @@ class Select(object):
         if self._geom.is_sane():
           self._window.resize(geom.h,geom.w)
           self._window.mvwin(geom.y,geom.x)
-          self._update()
+          self.update()
 
   def _on_playlog(self,ab,prop):
     with self._lock:
       if self._focus == self._logsel:
         playlog = self._audiobook.playlog
         if len(playlog)>0 and playlog[-1]!=self._last_entry:
-          self._update()
+          self.update()
 
   def _on_event(self,obj,event):
     data = event.split()
@@ -137,9 +136,9 @@ class Select(object):
       self._focus = self._filesel
     else:
       self._focus = self._logsel
-    self._update()
+    self.update()
 
-  def _update(self):
+  def update(self):
     with self._lock:
       self._focus.draw()
 
@@ -255,10 +254,12 @@ class LogSelect(object):
               event = playlog[logi].event)
 
             # Format all stuff after filename
-            position = playlog[logi].position
-            position = timedelta(microseconds=position/1000)
-            position = position - timedelta(microseconds=position.microseconds)
-            part2 = " {position}".format(position=position)
+            position = ns_to_str(playlog[logi].position)
+            duration = ns_to_str(playlog[logi].duration)
+
+            part2 = " {position} / {duration}".format(
+              position=position,
+              duration=duration)
 
             # Compute maximum length of filename
             part1len = max(0, self._geom.w - 1 - len(part0) - len(part2))
@@ -443,7 +444,7 @@ class Input(object):
 
     self._buffer = ""
 
-    self._update()
+    self.update()
 
   def run(self):
     try:
@@ -482,7 +483,7 @@ class Input(object):
           except (KeyError, IndexError):
             pass
 
-          self._update()
+          self.update()
           self._clear_timer.start()
     finally:
       self._quit.set()
@@ -492,7 +493,7 @@ class Input(object):
       if self._clear_timer.started():
         self._clear_timer.stop()
         self._key = None
-        self._update()
+        self.update()
 
   def quit(self):
     with self._lock:
@@ -512,9 +513,9 @@ class Input(object):
         if self._geom.is_sane():
           self._window.resize(geom.h,geom.w)
           self._window.mvwin(geom.y,geom.x)
-          self._update()
+          self.update()
 
-  def _update(self):
+  def update(self):
     with self._lock:
       if self._geom.is_sane():
         with self._curseslock:
@@ -543,7 +544,7 @@ class Volume(object):
     self._gst = audiobook.gst()
     self._geom = geom
     self._gst.connect("notify::volume",self._on_volume)
-    self._update()
+    self.update()
 
   def getGeom(self):
     with self._lock:
@@ -556,13 +557,13 @@ class Volume(object):
         if self._geom.is_sane():
           self._window.resize(geom.h,geom.w)
           self._window.mvwin(geom.y,geom.x)
-          self._update()
+          self.update()
 
   def _on_volume(self,obj,prop):
     with self._lock:
-      self._update()
+      self.update()
 
-  def _update(self):
+  def update(self):
     with self._lock:
       if self._geom.is_sane():
         try:
@@ -599,7 +600,7 @@ class Status(object):
       self._gst = self._audiobook.gst()
       self._window = geom.newwin()
       self._timer = RepeatingTimer(interval, self._on_timer)
-      self._update()
+      self.update()
 
   def quit(self):
     self._timer.destroy()
@@ -615,7 +616,7 @@ class Status(object):
         if self._geom.is_sane():
           self._window.resize(geom.h,geom.w)
           self._window.mvwin(geom.y,geom.x)
-          self._update()
+          self.update()
 
   def _on_playing(self,ab,prop):
     """Playing state updated.
@@ -637,25 +638,19 @@ class Status(object):
       ab    The audiobook that this is a view for.
     """
     with self._lock:
-      self._update()
+      self.update()
 
   def _on_timer(self):
     with self._lock:
       if self._timer.started():
-        self._update()
+        self.update()
 
-  def _update(self):
+  def update(self):
     with self._lock:
       if self._geom.is_sane():
         (filename,position,duration) = self._audiobook.position()
         if filename == None:
           filename = ""
-
-        position = timedelta(microseconds=position/1000)
-        position = position - timedelta(microseconds=position.microseconds)
-
-        duration = timedelta(microseconds=duration/1000)
-        duration = duration - timedelta(microseconds=duration.microseconds)
 
         if self._audiobook.playing:
           state = "Playing"
@@ -670,8 +665,8 @@ class Status(object):
           first = prefix + filename[-maxchars:]
 
           second = "{position} / {duration} [{state}]".format(
-            position=position,
-            duration=duration,
+            position=ns_to_str(position),
+            duration=ns_to_str(duration),
             state=state)
 
           self._window.erase()
@@ -732,42 +727,51 @@ class CursesUI(object):
       gobject.threads_init()
       self._mainloop = glib.MainLoop()
 
-      charmap = { "KEY_RESIZE":"resize",
-                  "^L":"resize",
-                  "q":"quit",
-                  " ":"play_pause",
-                  "KEY_LEFT":"seek -10",
-                  "h":"seek -10",
-                  "KEY_RIGHT":"seek +10",
-                  "l":"seek +10",
-                  "u":"volume +0.1",
-                  "d":"volume -0.1",
-                  "KEY_UP":"up",
-                  "KEY_DOWN":"down",
-                  "KEY_HOME":"begin",
-                  "KEY_END":"end",
-                  "KEY_PPAGE":"ppage",
-                  "KEY_NPAGE":"npage",
-                  "^I":"swap_view",
-                  "^J":"select {b}",
-                  "1":"buffer store 1",
-                  "2":"buffer store 2",
-                  "3":"buffer store 3",
-                  "4":"buffer store 4",
-                  "5":"buffer store 5",
-                  "6":"buffer store 6",
-                  "7":"buffer store 7",
-                  "8":"buffer store 8",
-                  "9":"buffer store 9",
-                  "0":"buffer store 0",
-                  ":":"buffer store :",
-                  "+":"buffer store +",
-                  "-":"buffer store -",
-                  "=":"buffer clear",
-                  "KEY_BACKSPACE":"buffer erase"}
+      if conf.default_bindings:
+        charmap = { "^L":"redraw",
+                    "q":"quit",
+                    " ":"play_pause",
+                    "KEY_LEFT":"seek -10",
+                    "h":"seek -10",
+                    "KEY_RIGHT":"seek +10",
+                    "l":"seek +10",
+                    "u":"volume +0.1",
+                    "d":"volume -0.1",
+                    "KEY_UP":"up",
+                    "KEY_DOWN":"down",
+                    "KEY_HOME":"begin",
+                    "KEY_END":"end",
+                    "KEY_PPAGE":"ppage",
+                    "KEY_NPAGE":"npage",
+                    "^I":"swap_view",
+                    "^J":"select {b}",
+                    "1":"buffer store 1",
+                    "2":"buffer store 2",
+                    "3":"buffer store 3",
+                    "4":"buffer store 4",
+                    "5":"buffer store 5",
+                    "6":"buffer store 6",
+                    "7":"buffer store 7",
+                    "8":"buffer store 8",
+                    "9":"buffer store 9",
+                    "0":"buffer store 0",
+                    ":":"buffer store :",
+                    "+":"buffer store +",
+                    "-":"buffer store -",
+                    "=":"buffer clear",
+                    "KEY_BACKSPACE":"buffer erase"}
+      else:
+        charmap = {}
 
+      for binding in conf.bind:
+        if len(binding)==2:
+          charmap[binding[0]] = binding[1]
+        elif len(binding)==1:
+          del charmap[binding[0]]
+                  
       (volume_geom, status_geom, input_geom, select_geom) = self._compute_geom()
 
+      charmap["KEY_RESIZE"] = "resize"
       self._input = Input(curseslock=self._curseslock,
                           geom=input_geom,
                           charmap=charmap,
@@ -826,9 +830,18 @@ class CursesUI(object):
 
   def _on_event(self,obj,event):
     data = event.split()
-    if len(data)>0 and data[0]=="resize":
-      with self._lock:
-        self._update_layout()
+    if len(data)>0:
+      cmd = data[0]
+      if cmd=="resize":
+        with self._lock:
+          self._update_layout()
+      elif cmd=="redraw":
+        with self._lock:
+          self._input.update()
+          self._volume.update()
+          self._status.update()
+          self._select.update()
+          
 
   def _update_layout(self):
     with self._lock:
@@ -866,8 +879,8 @@ class CursesUI(object):
       filename  The filename to start playing at. (Or None to let the player
                 decide.)
 
-      position  The position to start playing at. (Or none to let the player
-                decide.)
+      position  The position to start playing at in nanoseconds. (Or none to
+                let the player decide.)
     """
     try:
       self._audiobook.gst().set_property("volume",self._conf.volume)
@@ -888,33 +901,32 @@ def run():
     add_help=True,
     parents=[pstorytime.audiobookargs.audiobookargs],
     fromfile_prefix_chars="@",
-    formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     conflict_handler='resolve')
 
   parser.add_argument(
     "--cmdpipe",
-    help="Path to a pipe that commands are read from relative to current directory. See section on paths.",
+    help="Path to a pipe that commands are read from relative to current directory. See section on paths. (Default: %(default)s)",
     default="")
 
   parser.add_argument(
     "--playlog-file",
-    help="Path to the file to save playlog in relative to current directory. See section on paths.",
+    help="Path to the file to save playlog in relative to current directory. See section on paths. (Default: %(default)s)",
     default="{conf}/logs/{audiobook}/.playlog")
 
   parser.add_argument(
     "--conf-dir",
-    help="Configuration directory",
+    help="Configuration directory (Default: %(default)s)",
     default="~/.pstorytime")
 
   parser.add_argument(
     "path",
-    help="Audiobook directory, possibly including a file to start playing at.",
+    help="Audiobook directory, possibly including a file to start playing at. (Default: %(default)s)",
     nargs='?',
     default=".")
 
   parser.add_argument(
     "position",
-    help="Position to start playing at.",
+    help="Position to start playing at. (Default: %(default)s)",
     nargs='?',
     action=pstorytime.audiobookargs.Position)
 
@@ -925,15 +937,38 @@ def run():
 
   parser.add_argument(
     "--autoplay",
-    help="Start playing when the audiobook is started.",
-    dest='autoplay',
-    type=bool)
+    help="Start playing when the audiobook is started. (Default: %(default)s)",
+    action=pstorytime.audiobookargs.Boolean,
+    default=False)
 
   parser.add_argument(
     "--volume",
-    help="Playback volume as a float between 0 and 10.",
+    help="Playback volume as a float between 0 and 10. (Default: %(default)s)",
     default=1.0,
     type=float)
+
+  parser.add_argument(
+    "--default-bindings",
+    help="Load default bindings. Otherwise all bindings need to be added manually. (Default: %(default)s)",
+    action=pstorytime.audiobookargs.Boolean,
+    default=True)
+
+  parser.add_argument(
+    "--bind",
+    help="Add new binding from key to event. Key names are displayed in the program when pressed, possible events are listed in its own section.",
+    nargs=2,
+    metavar=('KEY','EVENT'),
+    action='append',
+    default=[])
+
+  parser.add_argument(
+    "--unbind",
+    help="Remove binding for the given key. Key names are displayed in the program when pressed.",
+    nargs=1,
+    metavar='KEY',
+    action='append',
+    dest='bind',
+    default=[])
 
   conf = parser.parse_args()
 

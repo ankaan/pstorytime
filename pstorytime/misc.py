@@ -22,6 +22,7 @@
 from os.path import abspath, expanduser, join, dirname, isdir, isfile
 import os
 import fcntl
+from datetime import timedelta
 
 __all__ = [
   'PathGen',
@@ -150,3 +151,8 @@ class DummyLock(object):
     """Release the lock.
     """
     return False
+
+def ns_to_str(time_ns):
+  dtime = timedelta(microseconds=time_ns/1000)
+  dtime = dtime - timedelta(microseconds=dtime.microseconds)
+  return str(dtime)
