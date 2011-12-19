@@ -131,17 +131,7 @@ class Log(gobject.GObject):
     if isfile(self._autolog_file):
       auto = self._load(self._autolog_file)
       if len(auto)==1:
-        # Get walltime of last entry in playlog, if available.
-        if len(self._playlog)>0:
-          logtime = self._playlog[-1].walltime
-        else:
-          logtime = 0
-        # Get walltime of entry in autolog.
-        autotime = auto[0].walltime
-        # Append autolog entry to the playlog if it is newer than the last
-        # entry in the playlog.
-        if autotime>logtime:
-          self._logentry(auto[0])
+        self._logentry(auto[0])
       os.remove(self._autolog_file)
 
   def quit(self):
