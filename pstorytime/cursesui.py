@@ -29,6 +29,7 @@ from os.path import isfile, isdir, join, expanduser, dirname, basename
 import select
 import signal
 import os
+from datetime import timedelta
 
 import pygst
 pygst.require("0.10")
@@ -47,6 +48,254 @@ from pstorytime.cmdparser import *
 from pstorytime.misc import PathGen, FileLock, DummyLock, LockedException
 from pstorytime.repeatingtimer import RepeatingTimer
 import pstorytime.audiobookargs
+
+class Select(object):
+  def __init__(self,curseslock,geom,audiobook,parser):
+    self._lock = RLock()
+    self._geom = geom
+    self._window = geom.newwin()
+    self._curseslock = curseslock
+    self._audiobook = audiobook
+    self._parser = parser
+
+    self._audiobook.connect("notify::playlog",self._on_playlog)
+
+    self._last_entry = None
+
+    self._logsel = LogSelect( self._window,
+                              self._geom,
+                              self._curseslock,
+                              self._audiobook)
+    self._focus = self._logsel
+
+    self._parser.connect("event",self._on_event)
+    self._update()
+
+  def getGeom(self):
+    with self._lock:
+      return self._geom
+
+  def setGeom(self,geom):
+    with self._lock:
+      with self._curseslock:
+        self._geom = geom
+        self._logsel.setGeom(geom)
+        if self._geom.is_sane():
+          self._window.resize(geom.h,geom.w)
+          self._window.mvwin(geom.y,geom.x)
+          self._update()
+
+  def _on_playlog(self,ab,prop):
+    with self._lock:
+      if self._focus == self._logsel:
+        playlog = self._audiobook.playlog
+        if len(playlog)>0 and playlog[-1]!=self._last_entry:
+          self._update()
+
+  def _on_event(self,obj,event):
+    data = event.split()
+    if len(data)>0:
+      cmd = data[0]
+      if cmd=="up":
+        self._focus.move(-1)
+
+      elif cmd=="down":
+        self._focus.move(1)
+
+      elif cmd=="ppage":
+        self._focus.ppage()
+
+      elif cmd=="npage":
+        self._focus.npage()
+
+      elif cmd=="begin":
+        self._focus.move_to(0)
+
+      elif cmd=="end":
+        self._focus.move_to(None)
+
+      elif cmd=="swap_view":
+        self._swap_view()
+
+      elif cmd=="select":
+        if len(data)==2:
+          (rel, pos) = parse_pos(data[1]) 
+          if pos == None:
+            return
+        else:
+          rel = None
+          pos = None
+        self._focus.select(rel,pos)
+
+  def _swap_view(self):
+    pass
+
+  def _update(self):
+    with self._lock:
+      self._focus.draw()
+
+class LogSelect(object):
+  def __init__(self,window,geom,curseslock,audiobook):
+    self._lock = RLock()
+    self._window = window
+    self._geom = geom
+    self._curseslock = curseslock
+    self._audiobook = audiobook
+
+    self._focus = None
+
+  def getGeom(self):
+    with self._lock:
+      return self._geom
+
+  def setGeom(self,geom):
+    with self._lock:
+      with self._curseslock:
+        self._geom = geom
+
+  def move(self,delta):
+    with self._lock:
+      playlog = self._audiobook.playlog
+      self._focus = calc_focus( length = len(playlog),
+                                focus = self._focus,
+                                delta = delta)
+      self.draw()
+
+  def ppage(self):
+    with self._lock:
+      playlog = self._audiobook.playlog
+      num = min(self._geom.h, len(playlog))
+      self._focus = calc_ppage( length = len(playlog),
+                                num = num,
+                                focus = self._focus)
+      self.draw()
+
+  def npage(self):
+    with self._lock:
+      playlog = self._audiobook.playlog
+      num = min(self._geom.h, len(playlog))
+      self._focus = calc_npage( length = len(playlog),
+                                num = num,
+                                focus = self._focus)
+      self.draw()
+
+  def move_to(self,focus):
+    with self._lock:
+      playlog = self._audiobook.playlog
+      self._focus = calc_focus( length = len(playlog),
+                                focus = focus,
+                                delta = 0)
+      self.draw()
+
+  def select(self,rel,bufpos):
+    with self._lock:
+      ab = self._audiobook
+      playlog = ab.playlog
+      if self._focus == None:
+        if rel:
+          ab.dseek(bufpos)
+        elif rel!=None:
+          ab.seek(None,bufpos)
+      else:
+        filename = playlog[self._focus].filename
+        position = playlog[self._focus].position
+        if rel:
+          ab.seek(filename,position+bufpos)
+        elif rel!=None:
+          ab.seek(filename,bufpos)
+        else:
+          ab.seek(filename,position)
+
+  def draw(self):
+    with self._lock:
+      if self._geom.is_sane():
+        with self._curseslock:
+          self._window.erase()
+
+          playlog = self._audiobook.playlog
+          num = min(self._geom.h, len(playlog))
+          focus = self._focus
+
+          if focus==None:
+            start = max(0, len(playlog)-num)
+          else:
+            start = max(0, min(len(playlog)-num, focus - num/2))
+
+          for i in xrange(0, num):
+            # Position in playlog
+            logi = i + start
+            # Check if this is the currently selected line
+            if logi == focus:
+              mark = "-> "
+              attr = curses.A_REVERSE
+            else:
+              mark = "   "
+              attr = curses.A_NORMAL
+
+            walltime = time.strftime("%Y-%m-%d %H:%M:%S",
+              time.gmtime(playlog[logi].walltime))
+
+            # Format all stuff before filename
+            part0 = "{mark}{walltime} {event:<10}".format(
+              mark = mark,
+              walltime = walltime,
+              event = playlog[logi].event)
+
+            # Format all stuff after filename
+            position = playlog[logi].position
+            position = timedelta(microseconds=position/1000)
+            position = position - timedelta(microseconds=position.microseconds)
+            part2 = " {position}".format(position=position)
+
+            # Compute maximum length of filename
+            part1len = max(0, self._geom.w - 1 - len(part0) - len(part2))
+            # Take the end of filename, if it is too long.
+            part1 = playlog[logi].filename[-part1len:]
+
+            # Combine into complete line.
+            pad = " " * (part1len - len(part1))
+            line = part0 + part1 + pad + part2
+
+            if self._geom.h>=1:
+              self._window.addnstr(i, 0, line, self._geom.w-1,attr)
+          self._window.refresh()
+
+def calc_focus(length,focus,delta):
+  if focus == None:
+    if delta>0:
+      focus = delta-1
+    else:
+      focus = delta+length
+  else:
+    focus += delta
+  
+  if focus<0 or focus>=length:
+    focus = None
+
+  return focus
+
+def calc_ppage(length,num,focus):
+  if focus == None:
+    focus = length-1
+
+  if focus > length-num/2:
+    focus = length-num/2
+
+  return max(0, focus - num)
+
+def calc_npage(length,num,focus):
+  if focus == None:
+    return None
+
+  if focus < num/2:
+    focus = num/2
+
+  newfocus = focus + num
+  
+  if newfocus > length:
+    return None
+  else:
+    return newfocus
 
 class Input(object):
   HEIGHT=1
@@ -357,7 +606,7 @@ class CursesUI(object):
 
       self._parser = CmdParser(self._audiobook,fifopath=conf.cmdpipe)
       self._parser.connect("quit",self._on_quit)
-      self._parser.register("resize",self._on_resize)
+      self._parser.connect("event",self._on_event)
 
       gobject.threads_init()
       self._mainloop = glib.MainLoop()
@@ -372,7 +621,14 @@ class CursesUI(object):
                   "l":"seek +10",
                   "u":"volume +0.1",
                   "d":"volume -0.1",
-                  "^J":"seek {b}",
+                  "KEY_UP":"up",
+                  "KEY_DOWN":"down",
+                  "KEY_HOME":"begin",
+                  "KEY_END":"end",
+                  "KEY_PPAGE":"ppage",
+                  "KEY_NPAGE":"npage",
+                  "^I":"swap_view",
+                  "^J":"select {b}",
                   "1":"buffer store 1",
                   "2":"buffer store 2",
                   "3":"buffer store 3",
@@ -389,7 +645,7 @@ class CursesUI(object):
                   "=":"buffer clear",
                   "KEY_BACKSPACE":"buffer erase"}
 
-      (volume_geom, status_geom, input_geom) = self._compute_geom()
+      (volume_geom, status_geom, input_geom, select_geom) = self._compute_geom()
 
       self._input = Input(curseslock=self._curseslock,
                           geom=input_geom,
@@ -406,6 +662,11 @@ class CursesUI(object):
                               audiobook=self._audiobook,
                               geom=status_geom,
                               interval=1)
+
+        self._select = Select(curseslock=self._curseslock,
+                              geom=select_geom,
+                              audiobook=self._audiobook,
+                              parser=self._parser)
 
       self._gobject_thread = Thread(target=self._mainloop.run,
                                     name="GobjectLoop")
@@ -434,20 +695,28 @@ class CursesUI(object):
                               y=max(0,topgeom.h-statusvol_h-Input.HEIGHT),
                               x=0)
 
-      return (volume_geom,status_geom,input_geom)
+      select_geom = Geometry( h=max(0,topgeom.h-statusvol_h-Input.HEIGHT),
+                              w=topgeom.w,
+                              y=0,
+                              x=0)
+
+      return (volume_geom,status_geom,input_geom,select_geom)
       
 
-  def _on_resize(self,event):
-    with self._lock:
-      self._update_layout()
+  def _on_event(self,obj,event):
+    data = event.split()
+    if len(data)>0 and data[0]=="resize":
+      with self._lock:
+        self._update_layout()
 
   def _update_layout(self):
     with self._lock:
       with self._curseslock:
-        (volume_geom,status_geom,input_geom) = self._compute_geom()
+        (volume_geom,status_geom,input_geom,select_geom) = self._compute_geom()
         self._input.setGeom(input_geom)
         self._volume.setGeom(volume_geom)
         self._status.setGeom(status_geom)
+        self._select.setGeom(select_geom)
 
   def _on_quit(self,obj):
     """The user asked to shut down the player.

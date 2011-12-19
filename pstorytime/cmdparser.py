@@ -46,7 +46,10 @@ class CmdParser(gobject.GObject):
                 (gobject.TYPE_STRING,)),
     'quit' : (gobject.SIGNAL_RUN_LAST,
               gobject.TYPE_NONE,
-              tuple())
+              tuple()),
+    'event' : ( gobject.SIGNAL_RUN_LAST,
+              gobject.TYPE_NONE,
+              (gobject.TYPE_STRING,))
   }
 
   def __init__(self,audiobook,handler=None,fifopath=None):
@@ -66,23 +69,6 @@ class CmdParser(gobject.GObject):
                           name="CmdParser")
     self._thread.setDaemon(True)
     self._thread.start()
-    self._eventmap = {}
-
-  def register(self,eventname,handler):
-    with self._lock:
-      handlers = self._eventmap.get(eventname,[])
-      handlers.append(handler)
-      self._eventmap[eventname] = handlers
-
-  def unregister(self,eventname,handler):
-    with self._lock:
-      if eventname in self._eventmap:
-        try:
-          self._eventmap[eventname].remove(handler)
-        except IndexError:
-          pass
-        if len(self._eventmap[eventname])==0:
-          del self._eventmap[eventname]
 
   def quit(self):
     """Shut down the parser."""
@@ -174,16 +160,10 @@ class CmdParser(gobject.GObject):
             return True
 
           else:
-            handlers = self._eventmap.get(cmd,[])
+            self.emit("event",line)
 
         except ValueError as e:
           pass
-
-    if len(handlers)>0:
-      for fun in handlers:
-        fun(line)
-      return True
-    else:
       self.emit('error','Failed to parse: "{0}"'.format(line.strip()))
       return False
 
@@ -247,6 +227,9 @@ def parse_pos(raw):
       return (None,None)
 
   parts = raw.split(":")
+
+  if '' in parts:
+    return (None,None)
 
   seconds = 0
   minutes = 0
