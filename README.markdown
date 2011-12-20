@@ -12,9 +12,9 @@ made seemlessly between different files.
 
 Dependencies
 ------------
-argparse  - Included in python >=2.7 and >=3.1.
-pygst     - Python gstreamer bindings.
-gstreamer - Including any codecs which you wish to be able to use.
+* argparse  - Included in python >=2.7 and >=3.1.
+* pygst     - Python gstreamer bindings.
+* gstreamer - Including any codecs which you wish to be able to use.
 
 Installation
 ------------
@@ -25,10 +25,12 @@ Testing if GStreamer is setup properly
 --------------------------------------
 
 Try to run:
-gst-launch-0.10 playbin2 uri=file://<path to file>
+
+gst-launch-0.10 playbin2 uri=file:/path/to/file
 
 For example:
-gst-launch-0.10 playbin2 uri=file:///usr/share/sounds/alsa/Front_Center.wav
+
+gst-launch-0.10 playbin2 uri=file:/usr/share/sounds/alsa/Front_Center.wav
 
 This will use the same playback system as the audiobook player. Also try this out with some audiobook file to make sure the codecs you need are set up properly.
 
