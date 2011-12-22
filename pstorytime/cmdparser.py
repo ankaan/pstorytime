@@ -155,12 +155,17 @@ class CmdParser(gobject.GObject):
             gst.set_property("volume",volume)
             return True
 
+          elif cmd=="mark" and len(data)==2:
+            self._audiobook.mark(data[1])
+            return True
+
           elif cmd=="quit" and len(data)==1:
             self.emit("quit")
             return True
 
           else:
             self.emit("event",line)
+            return True
 
         except ValueError as e:
           pass

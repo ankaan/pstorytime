@@ -178,6 +178,15 @@ class AudioBook(gobject.GObject):
           self._log.lognow("eob")
           self._log.stop()
 
+  def mark(self, name):
+    """Manually add an event in the playlog.
+    
+    Arguments:
+      name  Name of the event.
+    """
+    with self._lock:
+      self._log.lognow(name)
+
   def _play(self, start_file=None, start_pos=None, pos_relative_end=False, log=False, seek=False):
     """Internal general play abstraction.
     
@@ -190,7 +199,7 @@ class AudioBook(gobject.GObject):
                         start_file was given.) (Optional, defaults to None.)
 
       pos_relative_end  True if the length of the track should be added to
-                        start_pos.  (Optional, defaults to False)
+                        start_pos.  (Optional, defaults to False.)
 
       log               True if this should be logged as an event. (Optional,
                         defaults to False.)

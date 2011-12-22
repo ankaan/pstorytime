@@ -42,14 +42,14 @@ sys.argv = argv
 import argparse
 import time
 
-from pstorytime import *
+from pstorytime.audiobook import AudioBook
 from pstorytime.cmdparser import *
 from pstorytime.misc import PathGen, FileLock, DummyLock, LockedException, ns_to_str
 from pstorytime.repeatingtimer import RepeatingTimer
 import pstorytime.audiobookargs
 
 class Select(object):
-  def __init__(self,curseslock,geom,audiobook,parser):
+  def __init__(self,curseslock,conf,geom,audiobook,parser):
     self._lock = RLock()
     self._geom = geom
     self._window = geom.newwin()
@@ -62,6 +62,7 @@ class Select(object):
     self._last_entry = None
 
     self._logsel = LogSelect( self._window,
+                              conf,
                               self._geom,
                               self._curseslock,
                               self._audiobook)
@@ -143,9 +144,10 @@ class Select(object):
       self._focus.draw()
 
 class LogSelect(object):
-  def __init__(self,window,geom,curseslock,audiobook):
+  def __init__(self,window,conf,geom,curseslock,audiobook):
     self._lock = RLock()
     self._window = window
+    self._conf = conf
     self._geom = geom
     self._curseslock = curseslock
     self._audiobook = audiobook
@@ -247,11 +249,14 @@ class LogSelect(object):
             walltime = time.strftime("%Y-%m-%d %H:%M:%S",
               time.gmtime(playlog[logi].walltime))
 
+            event = playlog[logi].event[:self._conf.event_len]
+            event += " " * (self._conf.event_len - len(event))
+
             # Format all stuff before filename
-            part0 = "{mark}{walltime} {event:<10}".format(
+            part0 = "{mark}{walltime} {event} ".format(
               mark = mark,
               walltime = walltime,
-              event = playlog[logi].event)
+              event = event)
 
             # Format all stuff after filename
             position = ns_to_str(playlog[logi].position)
@@ -744,6 +749,7 @@ class CursesUI(object):
                     "KEY_PPAGE":"ppage",
                     "KEY_NPAGE":"npage",
                     "^I":"swap_view",
+                    "*":"mark *",
                     "^J":"select {b}",
                     "1":"buffer store 1",
                     "2":"buffer store 2",
@@ -789,6 +795,7 @@ class CursesUI(object):
                               interval=1)
 
         self._select = Select(curseslock=self._curseslock,
+                              conf=conf,
                               geom=select_geom,
                               audiobook=self._audiobook,
                               parser=self._parser)
@@ -969,6 +976,12 @@ def run():
     action='append',
     dest='bind',
     default=[])
+
+  parser.add_argument(
+    "--event-len",
+    help="Number of characters to display of event names in the playlog. (Default: %(default)s)",
+    default=8,
+    type=int)
 
   conf = parser.parse_args()
 
