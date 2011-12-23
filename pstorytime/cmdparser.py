@@ -48,8 +48,9 @@ class CmdParser(gobject.GObject):
               gobject.TYPE_NONE,
               tuple()),
     'event' : ( gobject.SIGNAL_RUN_LAST,
-              gobject.TYPE_NONE,
-              (gobject.TYPE_STRING,))
+              gobject.TYPE_BOOLEAN,
+              (gobject.TYPE_STRING,),
+              gobject.signal_accumulator_true_handled)
   }
 
   def __init__(self,audiobook,handler=None,fifopath=None):
@@ -106,7 +107,10 @@ class CmdParser(gobject.GObject):
         try:
           cmd = data[0]
 
-          if cmd=="play":
+          if self.emit("event",line):
+            return True
+
+          elif cmd=="play":
             start_file = self._get_file(data)
             (rel, start_pos) = self._get_pos(data)
             ab.play(start_file=start_file,start_pos=start_pos)
@@ -161,10 +165,6 @@ class CmdParser(gobject.GObject):
 
           elif cmd=="quit" and len(data)==1:
             self.emit("quit")
-            return True
-
-          else:
-            self.emit("event",line)
             return True
 
         except ValueError as e:

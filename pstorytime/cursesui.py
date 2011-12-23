@@ -103,34 +103,44 @@ class Select(object):
       cmd = data[0]
       if cmd=="up":
         self._focus.move(-1)
+        return True
 
       elif cmd=="down":
         self._focus.move(1)
+        return True
 
       elif cmd=="ppage":
         self._focus.ppage()
+        return True
 
       elif cmd=="npage":
         self._focus.npage()
+        return True
 
       elif cmd=="begin":
         self._focus.move_to(0)
+        return True
 
       elif cmd=="end":
         self._focus.move_to(None)
+        return True
 
       elif cmd=="swap_view":
         self._swap_view()
+        return True
 
       elif cmd=="select":
         if len(data)==2:
           (rel, pos) = parse_pos(data[1]) 
           if pos == None:
-            return
+            return False
         else:
           rel = None
           pos = None
         self._focus.select(rel,pos)
+        return True
+
+      return False
 
   def _swap_view(self):
     if self._focus == self._logsel:
@@ -842,12 +852,16 @@ class CursesUI(object):
       if cmd=="resize":
         with self._lock:
           self._update_layout()
+        return True
       elif cmd=="redraw":
         with self._lock:
           self._input.update()
           self._volume.update()
           self._status.update()
           self._select.update()
+        return True
+
+      return False
           
 
   def _update_layout(self):
