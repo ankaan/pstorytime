@@ -43,19 +43,18 @@ import argparse
 import time
 
 from pstorytime.audiobook import AudioBook
-from pstorytime.cmdparser import *
 from pstorytime.misc import PathGen, FileLock, DummyLock, LockedException, ns_to_str
 from pstorytime.repeatingtimer import RepeatingTimer
 import pstorytime.audiobookargs
 
 class Select(object):
-  def __init__(self,curseslock,conf,geom,audiobook,parser):
+  def __init__(self,curseslock,conf,geom,audiobook,reader):
     self._lock = RLock()
     self._geom = geom
     self._window = geom.newwin()
     self._curseslock = curseslock
     self._audiobook = audiobook
-    self._parser = parser
+    self._reader = reader
 
     self._audiobook.connect("notify::playlog",self._on_playlog)
 
@@ -72,7 +71,7 @@ class Select(object):
                                 self._audiobook)
     self._focus = self._logsel
 
-    self._parser.connect("event",self._on_event)
+    self._reader.connect("event",self._on_event)
     self.update()
 
   def getGeom(self):
@@ -434,20 +433,35 @@ def calc_npage(length,num,focus):
   else:
     return newfocus
 
-class Input(object):
+class Reader(gobject.GObject):
   HEIGHT=1
 
-  def __init__(self,curseslock,geom,charmap,parser=None):
+  __gsignals__ = {
+    'error' : ( gobject.SIGNAL_RUN_LAST,
+                gobject.TYPE_NONE,
+                (gobject.TYPE_STRING,)),
+    'event' : ( gobject.SIGNAL_RUN_LAST,
+              gobject.TYPE_BOOLEAN,
+              (gobject.TYPE_STRING,),
+              gobject.signal_accumulator_true_handled)
+  }
+
+  def __init__(self,curseslock,geom,charmap,fifopath=None):
+    gobject.GObject.__init__(self)
     self._lock = RLock()
     self._geom = geom
     self._curseslock = curseslock
+
+    if fifopath == "":
+      self._fifopath = None
+    else:
+      self._fifopath = fifopath
 
     self._window = geom.newwin()
     self._window.nodelay(1)
     self._window.keypad(1)
 
     self._charmap = charmap
-    self._parser = parser
 
     self._key = None
 
@@ -459,13 +473,29 @@ class Input(object):
 
     self._buffer = ""
 
+    self.connect("event",self._on_event)
+
     self.update()
 
   def run(self):
+    self._read()
+    #if self._fifopath == None:
+    #  self._read()
+    #else:
+    #  # Create fifo if it does not exist.
+    #  fifopath = expanduser(self._fifopath)
+    #  if not exists(fifopath):
+    #    os.mkfifo(fifopath,0700)
+    #  
+    #  self._read(fifohandle)
+
+  def _read(self):
+    handles = [sys.stdin]
+
     try:
       while not self._quit.is_set():
         try:
-          select.select([sys.stdin],[],[sys.stdin])
+          select.select(handles,[],handles)
         except select.error:
           pass
 
@@ -474,34 +504,42 @@ class Input(object):
 
         while True:
           with self._lock:
-            with self._curseslock:
-              ch = self._window.getch()
-              if ch == -1:
-                break
-              key = curses.keyname(ch)
+            try:
+              with self._curseslock:
+                ch = self._window.getch()
+                if ch == -1:
+                  break
+                key = curses.keyname(ch)
+
               self._key = key
-
-          try:
-            with self._lock:
-              event = self._charmap[key]
-              eventword = event.split()
-              eventname = eventword[0]
-              if eventname=="buffer":
-                if eventword[1] == "store":
-                  self._buffer += eventword[2]
-                elif eventword[1] == "erase":
-                  self._buffer = self._buffer[:-1]
-                elif eventword[1] == "clear":
-                  self._buffer = ""
-            if self._parser!=None and eventname!="buffer":
-              self._parser.do(event.format(b=self._buffer))
-          except (KeyError, IndexError):
-            pass
-
-          self.update()
-          self._clear_timer.start()
+              event = self._charmap[key].strip()
+              if not self.emit("event",event.format(b=self._buffer)):
+                self.emit('error','Failed to parse: "{0}"'.format(event))
+            except (KeyError, IndexError):
+              event == None
     finally:
       self._quit.set()
+
+  def _on_event(self,obj,event):
+    with self._lock:
+      eventword = event.split()
+      if eventword[0]=="buffer":
+        if eventword[1] == "store":
+          self._buffer += eventword[2]
+          return True
+        elif eventword[1] == "erase":
+          self._buffer = self._buffer[:-1]
+          return True
+        elif eventword[1] == "clear":
+          self._buffer = ""
+          return True
+        else:
+          return False
+
+        self.update()
+        self._clear_timer.start()
+      else:
+        return False
 
   def _clear_key(self):
     with self._lock:
@@ -735,10 +773,6 @@ class CursesUI(object):
 
       curses.curs_set(0)
 
-      self._parser = CmdParser(self._audiobook,fifopath=conf.cmdpipe)
-      self._parser.connect("quit",self._on_quit)
-      self._parser.connect("event",self._on_event)
-
       gobject.threads_init()
       self._mainloop = glib.MainLoop()
 
@@ -785,15 +819,20 @@ class CursesUI(object):
         elif len(binding)==1:
           del charmap[binding[0]]
                   
-      (volume_geom, status_geom, input_geom, select_geom) = self._compute_geom()
+      (volume_geom, status_geom, reader_geom, select_geom) = self._compute_geom()
 
       charmap["KEY_RESIZE"] = "resize"
-      self._input = Input(curseslock=self._curseslock,
-                          geom=input_geom,
-                          charmap=charmap,
-                          parser=self._parser)
+      self._reader = Reader(curseslock=self._curseslock,
+                            geom=reader_geom,
+                            charmap=charmap,
+                            fifopath=conf.cmdpipe)
+      self._reader.connect("event",self._on_event)
+
 
       with self._curseslock:
+        self._actuator = Actuator(audiobook=self._audiobook,
+                                  reader=self._reader)
+
         self._volume = Volume(curseslock=self._curseslock,
                               audiobook=self._audiobook,
                               geom=volume_geom)
@@ -808,7 +847,7 @@ class CursesUI(object):
                               conf=conf,
                               geom=select_geom,
                               audiobook=self._audiobook,
-                              parser=self._parser)
+                              reader=self._reader)
 
       self._gobject_thread = Thread(target=self._mainloop.run,
                                     name="GobjectLoop")
@@ -832,17 +871,17 @@ class CursesUI(object):
 
       statusvol_h = max(Volume.HEIGHT,Status.HEIGHT)
 
-      input_geom = Geometry(  h=min(Input.HEIGHT,topgeom.h-statusvol_h),
+      reader_geom = Geometry(  h=min(Reader.HEIGHT,topgeom.h-statusvol_h),
                               w=topgeom.w,
-                              y=max(0,topgeom.h-statusvol_h-Input.HEIGHT),
+                              y=max(0,topgeom.h-statusvol_h-Reader.HEIGHT),
                               x=0)
 
-      select_geom = Geometry( h=max(0,topgeom.h-statusvol_h-Input.HEIGHT),
+      select_geom = Geometry( h=max(0,topgeom.h-statusvol_h-Reader.HEIGHT),
                               w=topgeom.w,
                               y=0,
                               x=0)
 
-      return (volume_geom,status_geom,input_geom,select_geom)
+      return (volume_geom,status_geom,reader_geom,select_geom)
       
 
   def _on_event(self,obj,event):
@@ -855,10 +894,13 @@ class CursesUI(object):
         return True
       elif cmd=="redraw":
         with self._lock:
-          self._input.update()
+          self._reader.update()
           self._volume.update()
           self._status.update()
           self._select.update()
+        return True
+      elif cmd=="quit":
+        self.quit()
         return True
 
       return False
@@ -867,20 +909,11 @@ class CursesUI(object):
   def _update_layout(self):
     with self._lock:
       with self._curseslock:
-        (volume_geom,status_geom,input_geom,select_geom) = self._compute_geom()
-        self._input.setGeom(input_geom)
+        (volume_geom,status_geom,reader_geom,select_geom) = self._compute_geom()
+        self._reader.setGeom(reader_geom)
         self._volume.setGeom(volume_geom)
         self._status.setGeom(status_geom)
         self._select.setGeom(select_geom)
-
-  def _on_quit(self,obj):
-    """The user asked to shut down the player.
-    
-    Arguments:
-      obj   The parser interface.
-    """
-    with self._lock:
-      self.quit()
 
   def quit(self):
     """Shut down the audiobook player.
@@ -889,9 +922,8 @@ class CursesUI(object):
       self._audiobook.pause()
       self._status.quit()
       self._mainloop.quit()
-      self._parser.quit()
       self._audiobook.quit()
-      self._input.quit()
+      self._reader.quit()
 
   def run(self,filename,position):
     """Run the audiobook player.
@@ -911,9 +943,174 @@ class CursesUI(object):
       else:
         self._audiobook.seek(filename,position)
       self._gobject_thread.start()
-      self._input.run()
+      self._reader.run()
     except (KeyboardInterrupt, SystemExit):
       self.quit()
+
+class Actuator(object):
+  """A command actuator for the audiobook player.
+  """
+
+  def __init__(self,audiobook,reader):
+    """Create the actuator
+
+    Arguments:
+      audiobook   The audiobook player object to control.
+      reader      The reader that emits events.
+    """
+    self._lock = RLock()
+    self._audiobook = audiobook
+    self._reader = reader
+    self._reader.connect("event",self._on_event)
+
+  def _on_event(self,obj,event):
+    with self._lock:
+      ab = self._audiobook
+      data = event.split()
+      if len(data)>0:
+        try:
+          cmd = data[0]
+
+          if cmd=="play":
+            start_file = self._get_file(data)
+            (rel, start_pos) = self._get_pos(data)
+            ab.play(start_file=start_file,start_pos=start_pos)
+            return True
+
+          elif cmd=="pause":
+            ab.pause()
+            return True
+
+          elif cmd=="seek":
+            start_file = self._get_file(data)
+            (rel, start_pos) = self._get_pos(data)
+            if start_file == None and rel:
+              ab.dseek(start_pos)
+            else:
+              ab.seek(start_file=start_file,start_pos=start_pos)
+            return True
+
+          elif cmd=="dseek" and len(data)==2:
+            (rel, start_pos) = self._get_pos(data)
+            if start_pos != None:
+              ab.dseek(start_pos)
+            return True
+
+          elif cmd=="stepfile" and len(data)==2:
+            delta = int(data[1])
+            new_file = ab._get_file(delta)
+            if new_file!=None:
+              ab.seek(start_file=new_file,start_pos=0)
+            return True
+
+          elif cmd=="play_pause" and len(data)==1:
+            ab.play_pause()
+            return True
+
+          elif (cmd=="volume" or cmd=="dvolume") and len(data)==2:
+            raw = data[1]
+            if raw[0] == "+" or raw[0] == "-" or cmd == "dvolume":
+              gst = self._audiobook.gst()
+              oldvol = gst.get_property("volume")
+              volume = oldvol + float(raw)
+            else:
+              volume = float(raw)
+
+            volume = max(0, min(volume, 10))
+            gst.set_property("volume",volume)
+            return True
+
+          elif cmd=="mark" and len(data)==2:
+            self._audiobook.mark(data[1])
+            return True
+
+          elif cmd=="quit" and len(data)==1:
+            self.emit("quit")
+            return True
+
+        except ValueError as e:
+          pass
+      return False
+
+  def _get_file(self,data):
+    """Parse a filename from given data.
+    
+    Arguments:
+      data    List of strings representing each word.
+
+    Returns:  Filename, or None if no filename was given.
+    """
+    if len(data)>=3:
+      return " ".join(data[1:-1])
+    else:
+      return None
+
+  def _get_pos(self,data):
+    """Parse position.
+    
+    Arguments:
+      data    List of strings representing each word.
+
+    Returns:  Position, None if no position was given.
+
+    Exceptions:
+      ValueError if parsing failed.
+    """
+    if len(data)>=2:
+      (rel, pos) = parse_pos(data[-1])
+      if pos == None:
+        raise ValueError()
+      return (rel, pos)
+    else:
+      return (None,None)
+
+def parse_pos(raw):
+  """Parse position from given string.
+  
+  Arguments:
+    raw     raw data that is parsed to a position.
+
+  Returns:  Position of file in nanoseconds, or None
+            if parsing failed.
+  """
+
+  # Take care of negative positions
+  if raw[0] == "-":
+    sign = -1
+    raw = raw[1:]
+    rel = True
+  elif raw[0] == "+":
+    sign = 1
+    raw = raw[1:]
+    rel = True
+  else:
+    sign = 1
+    rel = False
+
+  for c in raw:
+    if c not in ":0123456789":
+      return (None,None)
+
+  parts = raw.split(":")
+
+  if '' in parts:
+    return (None,None)
+
+  seconds = 0
+  minutes = 0
+  hours = 0
+
+  if len(parts) >= 1:
+    seconds = int(parts[-1])
+  if len(parts) >= 2:
+    minutes = int(parts[-2])
+  if len(parts) >= 3:
+    hours = int(parts[-3])
+  if len(parts) > 3:
+    return (None,None)
+
+  pos = sign * ((hours*60 + minutes)*60 + seconds) * gst.SECOND
+  return (rel, pos)
 
 def run():
   parser = pstorytime.audiobookargs.ArgumentParser(

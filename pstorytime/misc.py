@@ -126,7 +126,7 @@ class FileLock(object):
     return False
 
 class DummyLock(object):
-  """A dummy lock.
+  """A dummy lock or anything else that is placed within a with-statement.
   """
   def __init__(self):
     """Create a dummy lock.
