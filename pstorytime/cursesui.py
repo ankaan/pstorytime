@@ -503,8 +503,8 @@ class Reader(gobject.GObject):
           break
 
         while True:
-          with self._lock:
-            try:
+          try:
+            with self._lock:
               with self._curseslock:
                 ch = self._window.getch()
                 if ch == -1:
@@ -513,10 +513,11 @@ class Reader(gobject.GObject):
 
               self._key = key
               event = self._charmap[key].strip()
-              if not self.emit("event",event.format(b=self._buffer)):
-                self.emit('error','Failed to parse: "{0}"'.format(event))
-            except (KeyError, IndexError):
-              event == None
+              event_formatted = event.format(b=self._buffer)
+            if not self.emit("event",event_formatted):
+              self.emit('error','Failed to parse: "{0}"'.format(event))
+          except (KeyError, IndexError):
+            pass
     finally:
       self._quit.set()
 
