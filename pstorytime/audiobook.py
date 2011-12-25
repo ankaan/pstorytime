@@ -438,5 +438,4 @@ class AudioBook(gobject.GObject):
     """
     with self._lock:
       self.pause()
-      self._log.quit()
       self._player.quit()

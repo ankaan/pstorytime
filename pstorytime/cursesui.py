@@ -44,7 +44,7 @@ import time
 
 from pstorytime.audiobook import AudioBook
 from pstorytime.misc import PathGen, FileLock, DummyLock, LockedException, ns_to_str, parse_pos
-from pstorytime.repeatingtimer import RepeatingTimer
+from pstorytime.timer import Timer
 import pstorytime.audiobookargs
 
 class Select(object):
@@ -469,7 +469,7 @@ class Reader(gobject.GObject):
     signal.signal(signal.SIGUSR1, lambda signum, stack_frame: None)
     signal.signal(signal.SIGTERM, lambda signum, stack_frame: exit(0))
 
-    self._clear_timer = RepeatingTimer(1,self._clear_key)
+    self._clear_timer = Timer(1000,self._clear_key,repeat=False)
 
     self._buffer = ""
 
@@ -512,6 +512,10 @@ class Reader(gobject.GObject):
                 key = curses.keyname(ch)
 
               self._key = key
+
+              self.update()
+              self._clear_timer.start()
+
               event = self._charmap[key].strip()
               event_formatted = event.format(b=self._buffer)
             if not self.emit("event",event_formatted):
@@ -527,31 +531,26 @@ class Reader(gobject.GObject):
       if eventword[0]=="buffer":
         if eventword[1] == "store":
           self._buffer += eventword[2]
+          self.update()
           return True
         elif eventword[1] == "erase":
           self._buffer = self._buffer[:-1]
+          self.update()
           return True
         elif eventword[1] == "clear":
           self._buffer = ""
+          self.update()
           return True
-        else:
-          return False
 
-        self.update()
-        self._clear_timer.start()
-      else:
-        return False
+      return False
 
   def _clear_key(self):
     with self._lock:
-      if self._clear_timer.started():
-        self._clear_timer.stop()
-        self._key = None
-        self.update()
+      self._key = None
+      self.update()
 
   def quit(self):
     with self._lock:
-      self._clear_timer.destroy()
       if not self._quit.is_set():
         self._quit.set()
         os.kill(os.getpid(), signal.SIGUSR1)
@@ -653,11 +652,8 @@ class Status(object):
       self._audiobook.connect("notify::playing",self._on_playing)
       self._gst = self._audiobook.gst()
       self._window = geom.newwin()
-      self._timer = RepeatingTimer(interval, self._on_timer)
+      self._timer = Timer(interval*1000, self._on_timer, repeat=True)
       self.update()
-
-  def quit(self):
-    self._timer.destroy()
 
   def getGeom(self):
     with self._lock:
@@ -696,8 +692,7 @@ class Status(object):
 
   def _on_timer(self):
     with self._lock:
-      if self._timer.started():
-        self.update()
+      self.update()
 
   def update(self):
     with self._lock:
@@ -921,7 +916,6 @@ class CursesUI(object):
     """
     with self._lock:
       self._audiobook.pause()
-      self._status.quit()
       self._mainloop.quit()
       self._audiobook.quit()
       self._reader.quit()
@@ -1023,10 +1017,6 @@ class Actuator(object):
 
           elif cmd=="mark" and len(data)==2:
             self._audiobook.mark(data[1])
-            return True
-
-          elif cmd=="quit" and len(data)==1:
-            self.emit("quit")
             return True
 
         except ValueError as e:

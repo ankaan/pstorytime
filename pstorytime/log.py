@@ -30,7 +30,7 @@ import threading
 import time
 import gobject
 
-from pstorytime.repeatingtimer import RepeatingTimer
+from pstorytime.timer import Timer
 from pstorytime.misc import withdoc
 
 class LogEntry(gobject.GObject):
@@ -132,7 +132,7 @@ class Log(gobject.GObject):
     self._playlog = self._load(self._playlog_file)
     self._pending = ""
 
-    self._autologtimer = RepeatingTimer(conf.autolog_interval, self._autolognow)
+    self._autologtimer = Timer(conf.autolog_interval*1000, self._autolognow, repeat=True)
 
     # Merge in old auto save (should only be there if the last session crashed
     # while playing.)
@@ -141,10 +141,6 @@ class Log(gobject.GObject):
       if len(auto)==1:
         self._logentry(auto[0])
       os.remove(self._autolog_file)
-
-  def quit(self):
-    """Quit the autologger, destroy everything. """
-    self._autologtimer.destroy()
 
   def start(self):
     """Start autologging (or reset the timer.)"""
