@@ -43,7 +43,7 @@ import argparse
 import time
 
 from pstorytime.audiobook import AudioBook
-from pstorytime.misc import PathGen, FileLock, DummyLock, LockedException, ns_to_str
+from pstorytime.misc import PathGen, FileLock, DummyLock, LockedException, ns_to_str, parse_pos
 from pstorytime.repeatingtimer import RepeatingTimer
 import pstorytime.audiobookargs
 
@@ -1063,54 +1063,6 @@ class Actuator(object):
       return (rel, pos)
     else:
       return (None,None)
-
-def parse_pos(raw):
-  """Parse position from given string.
-  
-  Arguments:
-    raw     raw data that is parsed to a position.
-
-  Returns:  Position of file in nanoseconds, or None
-            if parsing failed.
-  """
-
-  # Take care of negative positions
-  if raw[0] == "-":
-    sign = -1
-    raw = raw[1:]
-    rel = True
-  elif raw[0] == "+":
-    sign = 1
-    raw = raw[1:]
-    rel = True
-  else:
-    sign = 1
-    rel = False
-
-  for c in raw:
-    if c not in ":0123456789":
-      return (None,None)
-
-  parts = raw.split(":")
-
-  if '' in parts:
-    return (None,None)
-
-  seconds = 0
-  minutes = 0
-  hours = 0
-
-  if len(parts) >= 1:
-    seconds = int(parts[-1])
-  if len(parts) >= 2:
-    minutes = int(parts[-2])
-  if len(parts) >= 3:
-    hours = int(parts[-3])
-  if len(parts) > 3:
-    return (None,None)
-
-  pos = sign * ((hours*60 + minutes)*60 + seconds) * gst.SECOND
-  return (rel, pos)
 
 def run():
   parser = pstorytime.audiobookargs.ArgumentParser(

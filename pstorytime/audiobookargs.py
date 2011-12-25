@@ -21,7 +21,6 @@
 # along with pstorytime.  If not, see <http://www.gnu.org/licenses/>.
 
 import argparse
-import pstorytime.cmdparser
 
 class FromCommaList(argparse.Action):
   """Generate a list strings from a string of comma separated strings.
@@ -37,7 +36,7 @@ class Position(argparse.Action):
     if values == None:
       setattr(namespace, self.dest, None)
     else:
-      position = pstorytime.cmdparser.parse_pos(values)
+      position = pstorytime.misc.parse_pos(values)
       if position==None:
         raise argparse.ArgumentError(self,"Invalid file position: {0}".format(values))
       else:

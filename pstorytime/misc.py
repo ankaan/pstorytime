@@ -23,6 +23,7 @@ from os.path import abspath, expanduser, join, dirname, isdir, isfile
 import os
 import fcntl
 from datetime import timedelta
+from gst import SECOND
 
 __all__ = [
   'PathGen',
@@ -156,3 +157,51 @@ def ns_to_str(time_ns):
   dtime = timedelta(microseconds=time_ns/1000)
   dtime = dtime - timedelta(microseconds=dtime.microseconds)
   return str(dtime)
+
+def parse_pos(raw):
+  """Parse position from given string.
+  
+  Arguments:
+    raw     raw data that is parsed to a position.
+
+  Returns:  Position of file in nanoseconds, or None
+            if parsing failed.
+  """
+
+  # Take care of negative positions
+  if raw[0] == "-":
+    sign = -1
+    raw = raw[1:]
+    rel = True
+  elif raw[0] == "+":
+    sign = 1
+    raw = raw[1:]
+    rel = True
+  else:
+    sign = 1
+    rel = False
+
+  for c in raw:
+    if c not in ":0123456789":
+      return (None,None)
+
+  parts = raw.split(":")
+
+  if '' in parts:
+    return (None,None)
+
+  seconds = 0
+  minutes = 0
+  hours = 0
+
+  if len(parts) >= 1:
+    seconds = int(parts[-1])
+  if len(parts) >= 2:
+    minutes = int(parts[-2])
+  if len(parts) >= 3:
+    hours = int(parts[-3])
+  if len(parts) > 3:
+    return (None,None)
+
+  pos = sign * ((hours*60 + minutes)*60 + seconds) * SECOND
+  return (rel, pos)
